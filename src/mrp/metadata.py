@@ -6,27 +6,6 @@ import pyarrow.parquet as pq
 from .config import settings
 from .models import RenderResult
 
-_DDL_PG = """
-CREATE TABLE IF NOT EXISTS render_events (
-    render_id     TEXT PRIMARY KEY,
-    formula_id    TEXT NOT NULL,
-    formula_hash  TEXT NOT NULL,
-    params_json   JSONB NOT NULL,
-    width         INT NOT NULL,
-    height        INT NOT NULL,
-    runtime_ms    INT NOT NULL,
-    checksum      TEXT NOT NULL,
-    storage_uri   TEXT NOT NULL,
-    preview_uri   TEXT NOT NULL,
-    bytes_full    BIGINT NOT NULL,
-    bytes_preview BIGINT NOT NULL,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS ix_render_events_formula ON render_events(formula_id);
-CREATE INDEX IF NOT EXISTS ix_render_events_created ON render_events(created_at DESC);
-CREATE INDEX IF NOT EXISTS ix_render_events_hash    ON render_events(formula_hash);
-"""
-
 _DDL_SQLITE = """
 CREATE TABLE IF NOT EXISTS render_events (
     render_id     TEXT PRIMARY KEY,
@@ -48,11 +27,32 @@ CREATE INDEX IF NOT EXISTS ix_render_events_created ON render_events(created_at 
 CREATE INDEX IF NOT EXISTS ix_render_events_hash    ON render_events(formula_hash);
 """
 
+_DDL_PG = """
+CREATE TABLE IF NOT EXISTS render_events (
+    render_id     TEXT PRIMARY KEY,
+    formula_id    TEXT NOT NULL,
+    formula_hash  TEXT NOT NULL,
+    params_json   JSONB NOT NULL,
+    width         INT NOT NULL,
+    height        INT NOT NULL,
+    runtime_ms    INT NOT NULL,
+    checksum      TEXT NOT NULL,
+    storage_uri   TEXT NOT NULL,
+    preview_uri   TEXT NOT NULL,
+    bytes_full    BIGINT NOT NULL,
+    bytes_preview BIGINT NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+
 def _is_sqlite() -> bool:
     return settings.postgres_dsn.startswith("sqlite://")
 
 def _sqlite_path() -> str:
-    return settings.postgres_dsn.replace("sqlite://", "", 1)
+    s = settings.postgres_dsn
+    if s.startswith("sqlite:///"):
+        return s[len("sqlite:///"):]
+    return s.replace("sqlite://", "", 1)
 
 def init_db() -> None:
     if _is_sqlite():

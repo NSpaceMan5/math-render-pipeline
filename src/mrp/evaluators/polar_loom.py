@@ -1,9 +1,5 @@
 """
 polar_loom — original mathematical image formulation (this repo).
-
-For each pixel (u,v) in [-1,1]^2, convert to polar (r, theta), then sum
-three independent harmonic families for R, G, B, each sheared by a radial
-phase and weighted by an exponential envelope exp(-decay*r) / k^fold.
 """
 from __future__ import annotations
 import numpy as np
