@@ -172,12 +172,19 @@ GitHub Actions runs on every push and PR:
 
 ## Visual Output
 
-_Add preview PNGs to `docs/preview/` and reference them here. Only
-`docs/preview/*.png` is whitelisted in `.gitignore`; all other PNGs are
-excluded from the repo._
+### `polar_loom` — default parameters
 
-```markdown
 ![polar_loom default](docs/preview/polar_loom_default.png)
+
+Default: `rings=28, twist=2.7, decay=2.1, fold=1.15`, rendered at 1600×1200.
+Polar-harmonic interference with radial shearing.
+
+### `polar_loom` — parameter sweep
+
+![polar_loom sweep](docs/preview/polar_loom_sweep.png)
+
+Four rows, four values each — same code, only one parameter changed per
+panel. Top to bottom: `rings`, `twist`, `decay`, `fold`.
 ```
 
 ## Trade-offs
