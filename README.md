@@ -8,16 +8,19 @@
 A production-grade pipeline that renders mathematical formulas into image
 artifacts + structured metadata. Every render is byte-deterministic, fully
 traceable, and stored with lineage across filesystem/S3, SQLite/Postgres,
-and Parquet.
+and Parquet. Batch and streaming ingestion converge on the same metadata
+table.
 
 > Not "math art". A **pipeline** whose payload happens to be math art.
 
 ## Live demo
 
-▶️ **[math-render-pipeline.streamlit.app](https://math-render-pipeline-3kvjtr8gsh8rtpxsg4fwtc.streamlit.app/)**
+▶️ **[math-render-pipeline-3kvjtr8gsh8rtpxsg4fwtc.streamlit.app](https://math-render-pipeline-3kvjtr8gsh8rtpxsg4fwtc.streamlit.app/)**
 
-- **Live render** — adjust parameters, see output instantly
-- **Gallery** — seeded renders from all three formulas
+Three tabs:
+
+- **Live render** — adjust parameters for any of the three formulas, see output instantly
+- **Gallery** — 12 seeded renders across all formulas
 - **Metrics** — runtime, cost per megapixel, raw metadata
 
 ## What This Is
@@ -32,20 +35,20 @@ A data-engineering pipeline for parameterized image generation. Every render is:
   Lineage is queryable via SQL and Parquet.
 - **Portable** — SQLite or Postgres metadata; filesystem or S3/MinIO
   artifacts. Same code, two backends, chosen by env var.
-- **Dual-path ingestion** — batch CLI inserts directly; streaming path
-  publishes to Kafka and a consumer group writes idempotently.
 - **Columnar-friendly** — metadata is small and structured; images are large
   and unstructured. They are stored and queried separately.
+- **Streaming-capable** — batch path via CLI/DAG, streaming path via
+  Kafka (Redpanda) producer + consumer. Idempotent on `render_id`.
 - **Tested** — pytest suite covering shape, dtype, determinism, checksum,
-  parameter sensitivity, and streaming idempotency.
+  parameter sensitivity, metadata idempotency, and schema migration.
 
 ## Available Formulas
 
-| ID              | Family                                | Params                                | Output       |
-|-----------------|---------------------------------------|---------------------------------------|--------------|
-| `polar_loom`    | Polar harmonics with radial shear     | `rings, twist, decay, fold`           | PNG (H,W,3)  |
-| `harmonic_grid` | Cartesian orthogonal harmonics        | `nx, ny, phase, skew, mix`            | PNG (H,W,3)  |
-| `moire_grid`    | Interference between rotated lattices | `f1, f2, angle, mix, sharpen`         | PNG (H,W,3)  |
+| ID              | Channels | Params                                | Family                              |
+|-----------------|----------|---------------------------------------|-------------------------------------|
+| `polar_loom`    | RGB      | `rings, twist, decay, fold`           | Polar harmonics with radial shear   |
+| `harmonic_grid` | RGB      | `nx, ny, phase, skew, mix`            | Cartesian orthogonal harmonics      |
+| `moire_grid`    | RGB      | `f1, f2, angle, mix, sharpen`         | Interference of two rotated lattices|
 
 **Legend:**
 - *RGB* = 8-bit unsigned, shape `(H, W, 3)`
@@ -94,6 +97,33 @@ CSV columns: `formula_id, width, height, params_json`.
 mrp formulas
 ```
 
+## Streaming
+
+Two ingestion paths converge on the same `render_events` table:
+
+| Path    | Command                            | Backend                    |
+|---------|------------------------------------|----------------------------|
+| Batch   | `mrp run` / `mrp batch` / Airflow  | direct insert              |
+| Stream  | `mrp produce` → Kafka → consumer   | Redpanda + consumer group  |
+
+```bash
+# Start the streaming stack
+docker compose up -d redpanda postgres consumer
+
+# Publish 5 renders to render.events
+mrp produce --csv params/example_params.csv
+
+# Consumer runs continuously; safe against re-delivery
+mrp consume --max-messages 5
+
+# Or one-shot: render + publish
+mrp run --formula polar_loom --width 800 --height 600 \
+  --params '{"rings":20,"twist":2.0,"decay":2.0,"fold":1.0}' --stream
+```
+
+The consumer is idempotent on `render_id` — safe against Kafka re-delivery.
+The `ingest_source` column ('batch' or 'stream') distinguishes the two paths.
+
 ## Metadata Schema
 
 Table `render_events` (SQLite or Postgres):
@@ -111,7 +141,7 @@ Table `render_events` (SQLite or Postgres):
 | `preview_uri`   | TEXT        | `file://` or `s3://` to 512px preview    |
 | `bytes_full`    | BIGINT      | Size of full PNG                         |
 | `bytes_preview` | BIGINT      | Size of preview PNG                      |
-| `ingest_source` | TEXT        | `batch` or `stream`                      |
+| `ingest_source` | TEXT        | `'batch'` or `'stream'`                  |
 | `created_at`    | TIMESTAMPTZ | Insert time                              |
 
 Parquet mirror is partitioned by `formula_hash[:16]` and written with ZSTD.
@@ -124,6 +154,7 @@ Parquet mirror is partitioned by `formula_hash[:16]` and written with ZSTD.
 | `formula_hash` | SHA-256 of `(formula_id, params, width, height, samples)`    |
 | `checksum`     | SHA-256 of the PNG payload                                   |
 | `render_id`    | `formula_hash[:16]` + `uuid4()[:8]` (collision-free inserts) |
+| Stream event   | Kafka key = `render_id`; consumer idempotent on same field   |
 
 Implication: the same spec always produces the same bytes; different runs
 produce distinct `render_id`s so every render is preserved as an event.
@@ -131,19 +162,17 @@ produce distinct `render_id`s so every render is preserved as an event.
 ## Architecture
 
 ```
-                       ┌──▶ PNG full + preview ──▶ filesystem / S3
-                       │
-params.csv ──▶ Renderer ──▶ SQLite / Postgres: render_events
-                       │
-                       ├──▶ Parquet: partitioned by formula_hash[:16]
-                       │
-                       └──▶ Kafka topic: render.events
-                                  │
-                                  ▼
-                           Consumer (group: mrp-consumer)
-                                  │
-                                  ▼
-                           Postgres (idempotent on render_id)
+params.csv ──▶ Renderer (NumPy) ──▶ PNG full + preview ──▶ filesystem / S3
+                     │
+                     ├──▶ SQLite / Postgres: render_events
+                     ├──▶ Parquet: partitioned by formula_hash[:16]
+                     └──▶ Kafka topic: render.events
+                                │
+                                ▼
+                        Consumer (group: mrp-consumer)
+                                │
+                                ▼
+                        Postgres: render_events (idempotent)
 ```
 
 Layers:
@@ -152,32 +181,15 @@ Layers:
 - **Renderer** — wraps evaluator, produces bytes, computes checksum.
 - **Storage** — filesystem or S3/MinIO, selected by `USE_S3`.
 - **Metadata** — SQLite or Postgres, selected by `POSTGRES_DSN` scheme.
-- **Producer** — publishes to Kafka/Redpanda on `mrp produce`.
-- **Consumer** — reads `render.events`, writes idempotently.
-- **CLI** — `mrp run`, `mrp batch`, `mrp formulas`, `mrp produce`, `mrp consume`.
+- **Producer** — Kafka publisher (`src/mrp/streaming/producer.py`).
+- **Consumer** — idempotent stream ingester (`src/mrp/streaming/consumer.py`).
+- **CLI** — `mrp run`, `mrp batch`, `mrp produce`, `mrp consume`, `mrp formulas`.
+- **DAG** — Airflow (`dags/render_pipeline_dag.py`).
+- **Transforms** — dbt models (`dbt/models/`).
+- **Dashboards** — Grafana provisioning + `mrp.json`.
+- **Demo** — Streamlit app (`app.py`).
 
-## Streaming
-
-Two ingestion paths converge on `render_events`:
-
-| Path    | Command                            | Backend                    |
-|---------|------------------------------------|----------------------------|
-| Batch   | `mrp run` / `mrp batch`            | direct insert              |
-| Stream  | `mrp produce` → Kafka → consumer   | Redpanda + consumer group  |
-
-```bash
-# Start the streaming stack
-docker compose up -d redpanda postgres consumer
-
-# Publish renders to render.events
-mrp produce --csv params/example_params.csv
-
-# Consumer is idempotent on render_id — safe against re-delivery
-mrp consume --max-messages 5
-```
-
-The `ingest_source` column ('batch' | 'stream') distinguishes the two
-paths; Grafana tracks them separately.
+See [`docs/architecture.md`](docs/architecture.md) for the full diagram.
 
 ## Installation
 
@@ -185,8 +197,11 @@ paths; Grafana tracks them separately.
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
+# Optional: streaming support
+pip install -e ".[dev,streaming]"
+
 cp .env.example .env
-# edit .env if you want Postgres or S3
+# edit .env if you want Postgres, S3, or Kafka
 ```
 
 Minimal (no Postgres, no S3, no Kafka):
@@ -196,10 +211,11 @@ POSTGRES_DSN=sqlite:///./data/mrp.sqlite
 USE_S3=false
 ```
 
-With streaming:
+Full stack (Docker Compose):
 
 ```bash
-pip install -e ".[dev,streaming]"
+docker compose up -d            # Postgres + Redpanda + MinIO + Grafana
+docker compose up -d consumer   # streaming consumer
 ```
 
 ## Testing
@@ -210,13 +226,13 @@ pytest -q
 
 Coverage:
 
-- `test_evaluators.py` — output shape/dtype, determinism, param sensitivity.
-- `test_harmonic_grid.py`, `test_moire_grid.py` — per-formula correctness.
-- `test_registry.py` — plural registry, unknown-name error handling.
+- `test_evaluators.py`, `test_harmonic_grid.py`, `test_moire_grid.py` — output
+  shape/dtype, determinism, parameter sensitivity, non-blank check.
 - `test_renderer.py` — hash stability, checksum format, preview < full.
-- `test_metadata.py` — insert, idempotency, Parquet write.
+- `test_registry.py` — plural registry, defaults present, unknown raises.
+- `test_metadata.py` — insert + query round-trip, Parquet output.
 - `test_streaming_schemas.py` — event round-trip through Pydantic.
-- `test_streaming_metadata.py` — consumer insert + dedup + migration.
+- `test_streaming_metadata.py` — idempotent insert, migration adds column.
 
 ## CI
 
@@ -247,9 +263,9 @@ panel. Top to bottom: `rings`, `twist`, `decay`, `fold`.
 
 ![moire_grid sweep](docs/preview/moire_grid_sweep.png)
 
-Interference between two rotated grids. Rows: `f2` (22.0 → 23.0);
-columns: `angle` (0.02 → 0.25 rad). Beat fringe width grows as the two
-frequencies converge and the rotation angle decreases.
+Interference between two rotated grids. Rows: `f2` (22.0 → 23.0), columns:
+`angle` (0.02 → 0.25 rad). Beat fringe width grows as the two frequencies
+converge and the rotation angle decreases.
 
 ## Trade-offs
 
@@ -265,16 +281,18 @@ for a longer discussion. Summary:
 
 ## Roadmap
 
-- [x] Second and third formulas (`harmonic_grid`, `moire_grid`)
-- [x] Airflow DAG (`dags/render_pipeline_dag.py`)
-- [x] dbt models: `stg_renders → fct_render_events → agg_cost_daily`
-- [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB
+- [x] Second formula (`harmonic_grid`) to prove registry pluralism
+- [x] Third formula (`moire_grid`) — interference family
 - [x] Streaming layer (Kafka/Redpanda producer + consumer)
+- [x] Airflow DAG (`dags/render_pipeline_dag.py`)
+- [x] dbt models: `stg_renders → dim_formula / fct_render_events / agg_cost_daily`
+- [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB, events/min
+- [x] Docker Compose stack (Postgres + Redpanda + MinIO + Grafana)
+- [x] Terraform skeleton: S3 lifecycle tiering + RDS Postgres
 - [x] Live demo on Streamlit Cloud
-- [ ] Great Expectations runtime checks against `render_events`
-- [ ] Terraform: S3 bucket with lifecycle tiering + RDS Postgres
-- [ ] Real SAR/thermal rendering as a fourth formula family
+- [ ] Great Expectations runtime checks wired into the DAG
+- [ ] Fourth formula (`lissajous_web` or `harmonograph`)
 
 ## License
 
-MIT — see [LICENSE].
+MIT — see [LICENSE](LICENSE).
