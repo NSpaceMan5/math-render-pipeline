@@ -245,27 +245,48 @@ GitHub Actions runs on every push and PR:
 
 ## Visual Output
 
-### `polar_loom` — default parameters
+Every formula ships with a default preview and a parameter sweep. All
+panels are byte-reproducible from the parameters shown — same code, same
+seed-free deterministic output.
+
+### `polar_loom`
+
+**Default** — `rings=28, twist=2.7, decay=2.1, fold=1.15`, 1600×1200.
 
 ![polar_loom default](docs/preview/polar_loom_default.png)
 
-Default: `rings=28, twist=2.7, decay=2.1, fold=1.15`, rendered at 1600×1200.
 Polar-harmonic interference with radial shearing.
 
-### `polar_loom` — parameter sweep
+**Sweep** — rows: `rings` (8 → 48), columns: `twist` (1.0 → 4.0).
 
 ![polar_loom sweep](docs/preview/polar_loom_sweep.png)
 
-Four rows, four values each — same code, only one parameter changed per
-panel. Top to bottom: `rings`, `twist`, `decay`, `fold`.
+### `harmonic_grid`
 
-### `moire_grid` — parameter sweep
+**Default** — `nx=6, ny=4, phase=0.0, skew=0.0, mix=0.5`, 1600×1200.
+
+![harmonic_grid default](docs/preview/harmonic_grid_default.png)
+
+Cartesian orthogonal harmonics.
+
+**Sweep** — rows: `nx` (3 → 16), columns: `ny` (3 → 16).
+
+![harmonic_grid sweep](docs/preview/harmonic_grid_sweep.png)
+
+### `moire_grid`
+
+**Default** — `f1=22.0, f2=22.6, angle=0.06, mix=0.5, sharpen=1.4`, 1600×1200.
+
+![moire_grid default](docs/preview/moire_grid_default.png)
+
+Interference between two rotated lattices.
+
+**Sweep** — rows: `f2` (22.0 → 23.0), columns: `angle` (0.02 → 0.25 rad).
 
 ![moire_grid sweep](docs/preview/moire_grid_sweep.png)
 
-Interference between two rotated grids. Rows: `f2` (22.0 → 23.0), columns:
-`angle` (0.02 → 0.25 rad). Beat fringe width grows as the two frequencies
-converge and the rotation angle decreases.
+Beat fringe width grows as the two frequencies converge and the rotation
+angle decreases.
 
 ## Trade-offs
 
