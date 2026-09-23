@@ -1,16 +1,22 @@
 from __future__ import annotations
+
 from pathlib import Path
+
 from .config import settings
+
 
 def _s3_client():
     import boto3
     from botocore.client import Config
+
     return boto3.client(
-        "s3", endpoint_url=settings.s3_endpoint,
+        "s3",
+        endpoint_url=settings.s3_endpoint,
         aws_access_key_id=settings.s3_access_key,
         aws_secret_access_key=settings.s3_secret_key,
         config=Config(signature_version="s3v4"),
     )
+
 
 def put(render_id: str, full: bytes, preview: bytes) -> tuple[str, str]:
     if not settings.use_s3:

@@ -1,19 +1,24 @@
 from __future__ import annotations
+
 import json
 from pathlib import Path
-import typer
+
 import pandas as pd
+import typer
+
+from . import metadata, storage
+from .evaluators import registry
 from .models import RenderSpec
 from .renderer import render
-from . import storage, metadata
-from .evaluators import registry
 
 app = typer.Typer(add_completion=False)
+
 
 @app.command("formulas")
 def list_formulas():
     for name in registry.available():
         typer.echo(f"- {name}  defaults={registry.defaults(name)}")
+
 
 @app.command("run")
 def run(
@@ -23,14 +28,14 @@ def run(
     params: str = typer.Option("{}"),
 ):
     metadata.init_db()
-    spec = RenderSpec(formula_id=formula, width=width, height=height,
-                      params=json.loads(params))
+    spec = RenderSpec(formula_id=formula, width=width, height=height, params=json.loads(params))
     result, full, prev = render(spec)
     result.storage_uri, result.preview_uri = storage.put(result.render_id, full, prev)
     metadata.insert(result)
     pq_path = metadata.write_parquet(result)
     typer.echo(json.dumps(result.model_dump(), indent=2))
     typer.echo(f"parquet: {pq_path}")
+
 
 @app.command("batch")
 def batch(csv: Path = typer.Option(..., exists=True)):
@@ -48,6 +53,7 @@ def batch(csv: Path = typer.Option(..., exists=True)):
         metadata.insert(r)
         metadata.write_parquet(r)
         typer.echo(f"[ok] {r.render_id}  {r.runtime_ms} ms  {r.bytes_full} B")
+
 
 if __name__ == "__main__":
     app()

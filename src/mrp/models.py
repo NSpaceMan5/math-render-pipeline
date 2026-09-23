@@ -1,5 +1,7 @@
 from typing import Any
+
 from pydantic import BaseModel, Field
+
 
 class RenderSpec(BaseModel):
     formula_id: str
@@ -7,6 +9,7 @@ class RenderSpec(BaseModel):
     width: int = Field(gt=0)
     height: int = Field(gt=0)
     samples: int = Field(default=1, ge=1)
+
 
 class RenderResult(BaseModel):
     render_id: str

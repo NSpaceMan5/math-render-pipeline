@@ -1,16 +1,20 @@
 """
 polar_loom — original mathematical image formulation (this repo).
 """
+
 from __future__ import annotations
+
 import numpy as np
 
 _EPS = 1e-12
+
 
 def _normalize(a: np.ndarray) -> np.ndarray:
     lo, hi = float(a.min()), float(a.max())
     if hi - lo < _EPS:
         return np.zeros_like(a)
     return (a - lo) / (hi - lo)
+
 
 def polar_loom(
     width: int,
@@ -40,14 +44,19 @@ def polar_loom(
 
     for k in range(1, rings + 1):
         fk = float(k)
-        wgt = env / (fk ** fold)
+        wgt = env / (fk**fold)
         ch_r += np.sin(fk * Theta + phase + phi_r * fk) * wgt
-        ch_g += (np.cos((fk + 0.5) * Theta - phase + phi_g * fk)
-                 * np.cos(kappa_g * R * np.pi * fk) * wgt)
-        ch_b += (np.sin(fk * 0.75 * Theta + 1.3 * phase + phi_b * fk)
-                 * np.sin(kappa_b * R * np.pi * fk) * wgt)
+        ch_g += (
+            np.cos((fk + 0.5) * Theta - phase + phi_g * fk) * np.cos(kappa_g * R * np.pi * fk) * wgt
+        )
+        ch_b += (
+            np.sin(fk * 0.75 * Theta + 1.3 * phase + phi_b * fk)
+            * np.sin(kappa_b * R * np.pi * fk)
+            * wgt
+        )
 
     rgb = np.stack([_normalize(ch_r), _normalize(ch_g), _normalize(ch_b)], axis=-1)
     return (rgb * 255.0).astype(np.uint8)
+
 
 DEFAULTS = dict(rings=28, twist=2.7, decay=2.1, fold=1.15)

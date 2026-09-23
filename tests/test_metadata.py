@@ -1,13 +1,13 @@
 import sqlite3
 from pathlib import Path
+
+from mrp import metadata, storage
 from mrp.models import RenderSpec
 from mrp.renderer import render
-from mrp import metadata, storage
 
 
 def _fresh_spec():
-    return RenderSpec(formula_id="polar_loom", width=48, height=48,
-                      params={"rings": 6})
+    return RenderSpec(formula_id="polar_loom", width=48, height=48, params={"rings": 6})
 
 
 def test_init_and_insert():
@@ -25,6 +25,7 @@ def test_init_and_insert():
         ).fetchone()
     else:
         import psycopg
+
         with psycopg.connect(metadata.settings.postgres_dsn) as c:
             row = c.execute(
                 "SELECT formula_id, checksum FROM render_events WHERE render_id=%s",
