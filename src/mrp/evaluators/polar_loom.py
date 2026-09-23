@@ -59,4 +59,4 @@ def polar_loom(
     return (rgb * 255.0).astype(np.uint8)
 
 
-DEFAULTS = dict(rings=28, twist=2.7, decay=2.1, fold=1.15)
+DEFAULTS = {"rings": 28, "twist": 2.7, "decay": 2.1, "fold": 1.15}

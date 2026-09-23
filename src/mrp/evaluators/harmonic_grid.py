@@ -36,4 +36,4 @@ def harmonic_grid(
     return (np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
 
 
-DEFAULTS = dict(nx=6, ny=4, phase=0.0, skew=0.0, mix=0.5)
+DEFAULTS = {"nx": 6, "ny": 4, "phase": 0.0, "skew": 0.0, "mix": 0.5}
