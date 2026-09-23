@@ -1,0 +1,12 @@
+mrp:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_PG_HOST', 'postgres') }}"
+      user: "{{ env_var('DBT_PG_USER', 'mrp') }}"
+      password: "{{ env_var('DBT_PG_PASS', 'mrp') }}"
+      port: 5432
+      dbname: mrp
+      schema: analytics
+      threads: 4

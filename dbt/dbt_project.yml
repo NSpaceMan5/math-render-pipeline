@@ -1,0 +1,11 @@
+name: mrp
+version: "1.0.0"
+config-version: 2
+profile: mrp
+model-paths: ["models"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+models:
+  mrp:
+    staging: { +materialized: view }
+    marts:   { +materialized: table }
