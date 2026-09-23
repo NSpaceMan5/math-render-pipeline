@@ -1,6 +1,6 @@
 # Deterministic Mathematical Image Generation Pipeline
 
-[![Tests](https://github.com/NSpaceMan5/math-render-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/NSpaceMan5/math-render-pipeline/actions/workflows/ci.yml)
+[![Tests](https://github.com/WoodinGlass/math-render-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/WoodinGlass/math-render-pipeline/actions/workflows/ci.yml)
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://math-render-pipeline-3kvjtr8gsh8rtpxsg4fwtc.streamlit.app/)
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -11,6 +11,14 @@ traceable, and stored with lineage across filesystem/S3, SQLite/Postgres,
 and Parquet.
 
 > Not "math art". A **pipeline** whose payload happens to be math art.
+
+## Live demo
+
+▶️ **[math-render-pipeline.streamlit.app](https://math-render-pipeline-3kvjtr8gsh8rtpxsg4fwtc.streamlit.app/)**
+
+- **Live render** — adjust parameters, see output instantly
+- **Gallery** — seeded renders from all three formulas
+- **Metrics** — runtime, cost per megapixel, raw metadata
 
 ## What This Is
 
@@ -24,16 +32,20 @@ A data-engineering pipeline for parameterized image generation. Every render is:
   Lineage is queryable via SQL and Parquet.
 - **Portable** — SQLite or Postgres metadata; filesystem or S3/MinIO
   artifacts. Same code, two backends, chosen by env var.
+- **Dual-path ingestion** — batch CLI inserts directly; streaming path
+  publishes to Kafka and a consumer group writes idempotently.
 - **Columnar-friendly** — metadata is small and structured; images are large
   and unstructured. They are stored and queried separately.
 - **Tested** — pytest suite covering shape, dtype, determinism, checksum,
-  and parameter sensitivity.
+  parameter sensitivity, and streaming idempotency.
 
 ## Available Formulas
 
-| ID             | Channels | Params                        | Output        |
-|----------------|----------|-------------------------------|---------------|
-| `polar_loom`   | RGB      | `rings, twist, decay, fold`   | PNG (H,W,3)   |
+| ID              | Family                                | Params                                | Output       |
+|-----------------|---------------------------------------|---------------------------------------|--------------|
+| `polar_loom`    | Polar harmonics with radial shear     | `rings, twist, decay, fold`           | PNG (H,W,3)  |
+| `harmonic_grid` | Cartesian orthogonal harmonics        | `nx, ny, phase, skew, mix`            | PNG (H,W,3)  |
+| `moire_grid`    | Interference between rotated lattices | `f1, f2, angle, mix, sharpen`         | PNG (H,W,3)  |
 
 **Legend:**
 - *RGB* = 8-bit unsigned, shape `(H, W, 3)`
@@ -99,6 +111,7 @@ Table `render_events` (SQLite or Postgres):
 | `preview_uri`   | TEXT        | `file://` or `s3://` to 512px preview    |
 | `bytes_full`    | BIGINT      | Size of full PNG                         |
 | `bytes_preview` | BIGINT      | Size of preview PNG                      |
+| `ingest_source` | TEXT        | `batch` or `stream`                      |
 | `created_at`    | TIMESTAMPTZ | Insert time                              |
 
 Parquet mirror is partitioned by `formula_hash[:16]` and written with ZSTD.
@@ -118,10 +131,19 @@ produce distinct `render_id`s so every render is preserved as an event.
 ## Architecture
 
 ```
-params.csv ──▶ Renderer (NumPy) ──▶ PNG full + preview ──▶ filesystem / S3
-                     │
-                     ├──▶ SQLite / Postgres: render_events
-                     └──▶ Parquet: partitioned by formula_hash[:16]
+                       ┌──▶ PNG full + preview ──▶ filesystem / S3
+                       │
+params.csv ──▶ Renderer ──▶ SQLite / Postgres: render_events
+                       │
+                       ├──▶ Parquet: partitioned by formula_hash[:16]
+                       │
+                       └──▶ Kafka topic: render.events
+                                  │
+                                  ▼
+                           Consumer (group: mrp-consumer)
+                                  │
+                                  ▼
+                           Postgres (idempotent on render_id)
 ```
 
 Layers:
@@ -130,7 +152,32 @@ Layers:
 - **Renderer** — wraps evaluator, produces bytes, computes checksum.
 - **Storage** — filesystem or S3/MinIO, selected by `USE_S3`.
 - **Metadata** — SQLite or Postgres, selected by `POSTGRES_DSN` scheme.
-- **CLI** — `mrp run`, `mrp batch`, `mrp formulas`.
+- **Producer** — publishes to Kafka/Redpanda on `mrp produce`.
+- **Consumer** — reads `render.events`, writes idempotently.
+- **CLI** — `mrp run`, `mrp batch`, `mrp formulas`, `mrp produce`, `mrp consume`.
+
+## Streaming
+
+Two ingestion paths converge on `render_events`:
+
+| Path    | Command                            | Backend                    |
+|---------|------------------------------------|----------------------------|
+| Batch   | `mrp run` / `mrp batch`            | direct insert              |
+| Stream  | `mrp produce` → Kafka → consumer   | Redpanda + consumer group  |
+
+```bash
+# Start the streaming stack
+docker compose up -d redpanda postgres consumer
+
+# Publish renders to render.events
+mrp produce --csv params/example_params.csv
+
+# Consumer is idempotent on render_id — safe against re-delivery
+mrp consume --max-messages 5
+```
+
+The `ingest_source` column ('batch' | 'stream') distinguishes the two
+paths; Grafana tracks them separately.
 
 ## Installation
 
@@ -142,11 +189,17 @@ cp .env.example .env
 # edit .env if you want Postgres or S3
 ```
 
-Minimal (no Postgres, no S3):
+Minimal (no Postgres, no S3, no Kafka):
 
 ```
 POSTGRES_DSN=sqlite:///./data/mrp.sqlite
 USE_S3=false
+```
+
+With streaming:
+
+```bash
+pip install -e ".[dev,streaming]"
 ```
 
 ## Testing
@@ -157,9 +210,13 @@ pytest -q
 
 Coverage:
 
-- `test_evaluators.py` — output shape/dtype, determinism, param sensitivity,
-  non-blank check.
+- `test_evaluators.py` — output shape/dtype, determinism, param sensitivity.
+- `test_harmonic_grid.py`, `test_moire_grid.py` — per-formula correctness.
+- `test_registry.py` — plural registry, unknown-name error handling.
 - `test_renderer.py` — hash stability, checksum format, preview < full.
+- `test_metadata.py` — insert, idempotency, Parquet write.
+- `test_streaming_schemas.py` — event round-trip through Pydantic.
+- `test_streaming_metadata.py` — consumer insert + dedup + migration.
 
 ## CI
 
@@ -185,7 +242,14 @@ Polar-harmonic interference with radial shearing.
 
 Four rows, four values each — same code, only one parameter changed per
 panel. Top to bottom: `rings`, `twist`, `decay`, `fold`.
-```
+
+### `moire_grid` — parameter sweep
+
+![moire_grid sweep](docs/preview/moire_grid_sweep.png)
+
+Interference between two rotated grids. Rows: `f2` (22.0 → 23.0);
+columns: `angle` (0.02 → 0.25 rad). Beat fringe width grows as the two
+frequencies converge and the rotation angle decreases.
 
 ## Trade-offs
 
@@ -201,14 +265,16 @@ for a longer discussion. Summary:
 
 ## Roadmap
 
-- [ ] Second formula (`harmonic_grid`) to prove registry pluralism
+- [x] Second and third formulas (`harmonic_grid`, `moire_grid`)
+- [x] Airflow DAG (`dags/render_pipeline_dag.py`)
+- [x] dbt models: `stg_renders → fct_render_events → agg_cost_daily`
+- [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB
+- [x] Streaming layer (Kafka/Redpanda producer + consumer)
+- [x] Live demo on Streamlit Cloud
 - [ ] Great Expectations runtime checks against `render_events`
-- [ ] dbt models: `stg_renders → fct_render_events → agg_cost_daily`
-- [ ] Airflow DAG (`dags/render_pipeline_dag.py`)
-- [ ] Grafana dashboard: CPU-minutes/day, renders/day, storage MB
 - [ ] Terraform: S3 bucket with lifecycle tiering + RDS Postgres
+- [ ] Real SAR/thermal rendering as a fourth formula family
 
 ## License
 
 MIT — see [LICENSE].
-```
