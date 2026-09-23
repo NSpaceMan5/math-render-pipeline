@@ -5,6 +5,13 @@ Follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Streaming layer: Kafka/Redpanda producer + consumer
+- `mrp run --stream`, `mrp produce`, `mrp consume`
+- `render_events.ingest_source` column with migration
+- Grafana panel 'Stream events per minute'
+- Docker Compose: redpanda + console + consumer
+
+### Added
 - Second formula: `harmonic_grid`
 - Registry plural test, metadata layer tests
 - Lightweight data-quality runner

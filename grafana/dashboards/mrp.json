@@ -1,29 +1,138 @@
 {
-  "title": "MRP — render cost & throughput",
+  "title": "MRP \u2014 render cost & throughput",
   "uid": "mrp-cost",
   "schemaVersion": 39,
   "refresh": "1m",
-  "time": { "from": "now-30d", "to": "now" },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
   "panels": [
-    { "id": 1, "title": "Renders per day", "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "MRP-Postgres" },
-      "targets": [{ "rawSql": "SELECT date_trunc('day', created_at) AS time, count(*) AS value FROM render_events GROUP BY 1 ORDER BY 1", "format": "time_series" }] },
-    { "id": 2, "title": "CPU minutes per day", "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "MRP-Postgres" },
-      "targets": [{ "rawSql": "SELECT date_trunc('day', created_at) AS time, sum(runtime_ms)/60000.0 AS value FROM render_events GROUP BY 1 ORDER BY 1", "format": "time_series" }] },
-    { "id": 3, "title": "Storage (MB)", "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "MRP-Postgres" },
-      "targets": [{ "rawSql": "SELECT date_trunc('day', created_at) AS time, sum(bytes_full)/1024.0/1024.0 AS value FROM render_events GROUP BY 1 ORDER BY 1", "format": "time_series" }] },
-    { "id": 4, "title": "us per megapixel by formula", "type": "barchart",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "MRP-Postgres" },
-      "targets": [{ "rawSql": "SELECT formula_id, avg(runtime_ms::numeric / (width*height)) * 1e6 AS value FROM render_events GROUP BY 1", "format": "table" }] },
-    { "id": 5, "title": "Total renders", "type": "stat",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "MRP-Postgres" },
-      "targets": [{ "rawSql": "SELECT count(*) AS value FROM render_events", "format": "table" }] }
+    {
+      "id": 1,
+      "title": "Renders per day",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "MRP-Postgres"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', created_at) AS time, count(*) AS value FROM render_events GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "CPU minutes per day",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "MRP-Postgres"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', created_at) AS time, sum(runtime_ms)/60000.0 AS value FROM render_events GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Storage (MB)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "MRP-Postgres"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', created_at) AS time, sum(bytes_full)/1024.0/1024.0 AS value FROM render_events GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "us per megapixel by formula",
+      "type": "barchart",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "MRP-Postgres"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT formula_id, avg(runtime_ms::numeric / (width*height)) * 1e6 AS value FROM render_events GROUP BY 1",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Total renders",
+      "type": "stat",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "MRP-Postgres"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT count(*) AS value FROM render_events",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Stream events per minute",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "MRP-Postgres"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('minute', created_at) AS time, count(*) AS value FROM render_events WHERE ingest_source='stream' GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    }
   ]
 }

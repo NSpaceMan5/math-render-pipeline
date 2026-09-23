@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS render_events (
     preview_uri   TEXT NOT NULL,
     bytes_full    INTEGER NOT NULL,
     bytes_preview INTEGER NOT NULL,
+    ingest_source TEXT NOT NULL DEFAULT 'batch',
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_render_events_formula ON render_events(formula_id);
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS render_events (
     preview_uri   TEXT NOT NULL,
     bytes_full    BIGINT NOT NULL,
     bytes_preview BIGINT NOT NULL,
+    ingest_source TEXT NOT NULL DEFAULT 'batch',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 """
@@ -67,11 +69,60 @@ def init_db() -> None:
         Path(p).parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(p) as c:
             c.executescript(_DDL_SQLITE)
+        _migrate_sqlite()
     else:
         import psycopg
 
         with psycopg.connect(settings.postgres_dsn, autocommit=True) as c:
             c.execute(_DDL_PG)
+
+
+
+def _migrate_sqlite() -> None:
+    """Add `ingest_source` if missing (older DBs)."""
+    p = _sqlite_path()
+    if not Path(p).exists():
+        return
+    with sqlite3.connect(p) as c:
+        cols = {row[1] for row in c.execute("PRAGMA table_info(render_events)")}
+        if "ingest_source" not in cols:
+            c.execute(
+                "ALTER TABLE render_events "
+                "ADD COLUMN ingest_source TEXT NOT NULL DEFAULT 'batch'"
+            )
+
+
+def insert_event(event: dict) -> None:
+    """Idempotent insert from a streaming event dict."""
+    row = (
+        event["render_id"], event["formula_id"], event["formula_hash"],
+        json.dumps(event["params_json"]), event["width"], event["height"],
+        event["runtime_ms"], event["checksum"],
+        event["storage_uri"], event["preview_uri"],
+        event["bytes_full"], event["bytes_preview"],
+        event.get("ingest_source", "stream"),
+    )
+    if _is_sqlite():
+        with sqlite3.connect(_sqlite_path()) as c:
+            c.execute("""
+                INSERT OR IGNORE INTO render_events
+                  (render_id, formula_id, formula_hash, params_json, width, height,
+                   runtime_ms, checksum, storage_uri, preview_uri,
+                   bytes_full, bytes_preview, ingest_source)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, row)
+    else:
+        import psycopg
+        with psycopg.connect(settings.postgres_dsn) as c:
+            c.execute("""
+                INSERT INTO render_events
+                  (render_id, formula_id, formula_hash, params_json, width, height,
+                   runtime_ms, checksum, storage_uri, preview_uri,
+                   bytes_full, bytes_preview, ingest_source)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (render_id) DO NOTHING
+            """, row)
+            c.commit()
 
 
 def insert(r: RenderResult) -> None:
@@ -88,6 +139,7 @@ def insert(r: RenderResult) -> None:
         r.preview_uri,
         r.bytes_full,
         r.bytes_preview,
+        "batch",
     )
     if _is_sqlite():
         with sqlite3.connect(_sqlite_path()) as c:
@@ -96,24 +148,23 @@ def insert(r: RenderResult) -> None:
                 INSERT OR IGNORE INTO render_events
                   (render_id, formula_id, formula_hash, params_json, width, height,
                    runtime_ms, checksum, storage_uri, preview_uri,
-                   bytes_full, bytes_preview)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
+                   bytes_full, bytes_preview, ingest_source)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
                 row,
             )
     else:
         import psycopg
-
         with psycopg.connect(settings.postgres_dsn) as c:
             c.execute(
                 """
                 INSERT INTO render_events
                   (render_id, formula_id, formula_hash, params_json, width, height,
                    runtime_ms, checksum, storage_uri, preview_uri,
-                   bytes_full, bytes_preview)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   bytes_full, bytes_preview, ingest_source)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (render_id) DO NOTHING
-            """,
+                """,
                 row,
             )
             c.commit()

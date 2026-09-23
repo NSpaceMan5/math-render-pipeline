@@ -7,6 +7,6 @@ select
     coalesce((params_json->>'nx')::int,        0) as nx,
     coalesce((params_json->>'ny')::int,        0) as ny,
     width, height, runtime_ms, checksum, storage_uri, preview_uri,
-    bytes_full, bytes_preview, created_at,
+    bytes_full, bytes_preview, ingest_source, created_at,
     date_trunc('day', created_at) as render_day
 from {{ source('mrp', 'render_events') }}
