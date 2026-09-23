@@ -1,8 +1,8 @@
 # Deterministic Mathematical Image Generation Pipeline
 
-![Tests](https://github.com/NSpaceMan5/math-render-pipeline/actions/workflows/ci.yml/badge.svg)
+[![Tests](https://github.com/NSpaceMan5/math-render-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/NSpaceMan5/math-render-pipeline/actions/workflows/ci.yml)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://math-render-pipeline-3kvjtr8gsh8rtpxsg4fwtc.streamlit.app/)
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
-![NumPy](https://img.shields.io/badge/numpy-1.26+-013243)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 A production-grade pipeline that renders mathematical formulas into image
