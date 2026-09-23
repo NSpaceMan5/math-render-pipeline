@@ -1,0 +1,24 @@
+# artifacts — never commit full renders
+*.png
+*.exr
+*.tif
+data/
+!docs/preview/*.png
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# dbt / terraform (untuk versi produksi)
+dbt/target/
+dbt/logs/
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*

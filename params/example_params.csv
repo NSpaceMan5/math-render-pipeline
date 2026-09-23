@@ -1,0 +1,6 @@
+formula_id,width,height,params_json
+polar_loom,1600,1200,"{""rings"":16,""twist"":1.8,""decay"":2.4,""fold"":1.0}"
+polar_loom,1600,1200,"{""rings"":28,""twist"":2.7,""decay"":2.1,""fold"":1.15}"
+polar_loom,1600,1200,"{""rings"":48,""twist"":3.6,""decay"":1.8,""fold"":1.3}"
+polar_loom,2048,1536,"{""rings"":32,""twist"":2.2,""decay"":1.9,""fold"":1.05}"
+polar_loom,2048,1536,"{""rings"":64,""twist"":4.1,""decay"":1.6,""fold"":1.4}"

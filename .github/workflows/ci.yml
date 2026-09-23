@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - name: Tests
+        env:
+          POSTGRES_DSN: sqlite:///./data/mrp.sqlite
+          USE_S3: "false"
+        run: pytest -q
+      - name: Smoke render
+        env:
+          POSTGRES_DSN: sqlite:///./data/mrp.sqlite
+          USE_S3: "false"
+        run: |
+          mrp run --formula polar_loom --width 320 --height 240 \
+            --params '{"rings":12,"twist":2.0,"decay":2.0,"fold":1.0}'

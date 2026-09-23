@@ -1,0 +1,21 @@
+{
+  "expectation_suite_name": "renders_suite",
+  "expectations": [
+    { "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": { "column": "render_id" } },
+    { "expectation_type": "expect_column_values_to_be_unique",
+      "kwargs": { "column": "render_id" } },
+    { "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": { "column": "checksum", "regex": "^[a-f0-9]{64}$" } },
+    { "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": { "column": "formula_hash", "regex": "^[a-f0-9]{64}$" } },
+    { "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": { "column": "runtime_ms", "min_value": 1 } },
+    { "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": { "column": "width",  "min_value": 32, "max_value": 16384 } },
+    { "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": { "column": "height", "min_value": 32, "max_value": 16384 } },
+    { "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": { "column": "bytes_full", "min_value": 1024 } }
+  ]
+}
