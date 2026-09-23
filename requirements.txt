@@ -1,0 +1,7 @@
+streamlit>=1.30
+numpy>=1.26
+pillow>=10.0
+pandas>=2.2
+pyarrow>=15.0
+pydantic>=2.6
+pydantic-settings>=2.2

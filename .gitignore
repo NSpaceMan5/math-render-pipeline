@@ -15,3 +15,9 @@ dbt/target/
 dbt/logs/
 infra/terraform/.terraform/
 infra/terraform/*.tfstate*
+
+# whitelist demo data (small, <2MB) for Streamlit Cloud
+!demo_data/
+!demo_data/renders.parquet
+!demo_data/thumbs/
+!demo_data/thumbs/*.png
