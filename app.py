@@ -14,6 +14,7 @@ from PIL import Image
 
 from mrp.evaluators.polar_loom import polar_loom, DEFAULTS as PL_DEFAULTS
 from mrp.evaluators.harmonic_grid import harmonic_grid, DEFAULTS as HG_DEFAULTS
+from mrp.evaluators.moire_grid import moire_grid, DEFAULTS as MG_DEFAULTS
 
 
 st.set_page_config(
@@ -29,6 +30,7 @@ PARQUET = DEMO / "renders.parquet"
 FORMULAS = {
     "polar_loom":    (polar_loom,    PL_DEFAULTS, "Polar harmonic interference"),
     "harmonic_grid": (harmonic_grid, HG_DEFAULTS, "Cartesian orthogonal harmonics"),
+    "moire_grid":    (moire_grid,    MG_DEFAULTS, "Interference of two rotated grids"),
 }
 
 st.title("Deterministic Mathematical Image Generation Pipeline")
@@ -129,8 +131,9 @@ artifacts and structured metadata.
 
 - **Determinism** — same `(formula_id, params, w, h)` ⇒ byte-identical PNG.
   `formula_hash = sha256(spec)`, `checksum = sha256(png_bytes)`.
-- **Two formulas** — `polar_loom` (polar harmonics with radial shear),
-  `harmonic_grid` (Cartesian orthogonal harmonics).
+- **Three formulas** — `polar_loom` (polar harmonics with radial shear),
+  `harmonic_grid` (Cartesian orthogonal harmonics), `moire_grid`
+  (interference between two rotated lattices).
 - **Metadata** — Parquet mirror partitioned by `formula_hash`, plus
   SQLite/Postgres `render_events` for the batch path.
 - **Streaming** — optional Kafka/Redpanda producer + consumer

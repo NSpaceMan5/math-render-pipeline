@@ -5,14 +5,17 @@ import numpy as np
 
 from .harmonic_grid import DEFAULTS as _HG_DEFAULTS
 from .harmonic_grid import harmonic_grid
+from .moire_grid import DEFAULTS as _MG_DEFAULTS
+from .moire_grid import moire_grid
 from .polar_loom import DEFAULTS as _PL_DEFAULTS
 from .polar_loom import polar_loom
 
 Evaluator = Callable[..., np.ndarray]
 
 _REGISTRY: dict[str, tuple[Evaluator, dict[str, Any]]] = {
-    "polar_loom": (polar_loom, _PL_DEFAULTS),
     "harmonic_grid": (harmonic_grid, _HG_DEFAULTS),
+    "moire_grid":    (moire_grid,    _MG_DEFAULTS),
+    "polar_loom":    (polar_loom,    _PL_DEFAULTS),
 }
 
 

@@ -27,14 +27,18 @@ DEMO.mkdir(exist_ok=True)
 THUMBS.mkdir(exist_ok=True)
 
 SEEDS = [
-    ("polar_loom",    {"rings": 8,  "twist": 1.0, "decay": 2.5, "fold": 1.0},      640, 480),
-    ("polar_loom",    {"rings": 16, "twist": 1.8, "decay": 2.4, "fold": 1.0},      640, 480),
-    ("polar_loom",    {"rings": 28, "twist": 2.7, "decay": 2.1, "fold": 1.15},     640, 480),
-    ("polar_loom",    {"rings": 48, "twist": 3.6, "decay": 1.8, "fold": 1.3},      640, 480),
-    ("harmonic_grid", {"nx": 6,  "ny": 4,  "phase": 0.0, "skew": 0.0, "mix": 0.5}, 640, 480),
-    ("harmonic_grid", {"nx": 10, "ny": 6,  "phase": 0.3, "skew": 0.0, "mix": 0.7}, 640, 480),
-    ("harmonic_grid", {"nx": 14, "ny": 8,  "phase": 0.6, "skew": 0.4, "mix": 0.3}, 640, 480),
-    ("harmonic_grid", {"nx": 6,  "ny": 12, "phase": 0.9, "skew": 0.8, "mix": 0.9}, 640, 480),
+    ("polar_loom",    {"rings": 8,  "twist": 1.0, "decay": 2.5, "fold": 1.0},             640, 480),
+    ("polar_loom",    {"rings": 16, "twist": 1.8, "decay": 2.4, "fold": 1.0},             640, 480),
+    ("polar_loom",    {"rings": 28, "twist": 2.7, "decay": 2.1, "fold": 1.15},            640, 480),
+    ("polar_loom",    {"rings": 48, "twist": 3.6, "decay": 1.8, "fold": 1.3},             640, 480),
+    ("harmonic_grid", {"nx": 6,  "ny": 4,  "phase": 0.0, "skew": 0.0, "mix": 0.5},        640, 480),
+    ("harmonic_grid", {"nx": 10, "ny": 6,  "phase": 0.3, "skew": 0.0, "mix": 0.7},        640, 480),
+    ("harmonic_grid", {"nx": 14, "ny": 8,  "phase": 0.6, "skew": 0.4, "mix": 0.3},        640, 480),
+    ("harmonic_grid", {"nx": 6,  "ny": 12, "phase": 0.9, "skew": 0.8, "mix": 0.9},        640, 480),
+    ("moire_grid",    {"f1": 18.0, "f2": 18.4, "angle": 0.04, "mix": 0.5, "sharpen": 1.2}, 640, 480),
+    ("moire_grid",    {"f1": 22.0, "f2": 22.6, "angle": 0.06, "mix": 0.5, "sharpen": 1.4}, 640, 480),
+    ("moire_grid",    {"f1": 30.0, "f2": 31.2, "angle": 0.10, "mix": 0.5, "sharpen": 1.6}, 640, 480),
+    ("moire_grid",    {"f1": 14.0, "f2": 15.0, "angle": 0.20, "mix": 0.5, "sharpen": 2.0}, 640, 480),
 ]
 
 

@@ -2,7 +2,7 @@ from mrp.evaluators import registry
 
 
 def test_two_formulas_registered():
-    assert set(registry.available()) >= {"polar_loom", "harmonic_grid"}
+    assert set(registry.available()) >= {"polar_loom", "harmonic_grid", "moire_grid"}
 
 
 def test_defaults_present():
