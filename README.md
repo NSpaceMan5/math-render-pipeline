@@ -43,9 +43,13 @@ A data-engineering pipeline for parameterized image generation. Every render is:
   count; malformed JSON is quarantined without crashing the consumer.
 - **Migratable** — Alembic-managed schema, works with SQLite and Postgres.
   `alembic upgrade head` is idempotent and safe on existing DBs.
+- **Observable** — structured JSON logs with `correlation_id`, Prometheus
+  `/metrics` endpoint, OpenTelemetry tracing, Grafana alerts, and 5
+  incident runbooks.
 - **Tested** — pytest suite covering shape, dtype, determinism, checksum,
-  parameter sensitivity, metadata idempotency, schema migration, and
-  integration tests against real Postgres + Kafka via testcontainers.
+  parameter sensitivity, metadata idempotency, schema migration, DLQ
+  semantics, and integration tests against real Postgres + Kafka via
+  testcontainers.
 
 ## Available Formulas
 
@@ -152,6 +156,79 @@ Each DLQ payload contains `correlation_id`, `original_topic`, `error`,
 `attempts`, `raw`, `failed_at`. The consumer emits one `correlation_id`
 per event across all log lines for tracing.
 
+## Observability
+
+Four pillars, all optional. Each is off unless the corresponding env var
+is set.
+
+### Structured logs
+
+Every log line is a single JSON object:
+
+```json
+{"ts":"2026-09-25T12:34:56.789Z","level":"INFO",
+ "logger":"mrp.streaming.consumer",
+ "msg":"ingested render_id=abc formula=polar_loom",
+ "correlation_id":"a1b2c3d4e5f6"}
+```
+
+`correlation_id` is created by the producer, embedded in the event payload,
+and reattached by the consumer — so a single id traces the full path of one
+event. Enable with `LOG_LEVEL=INFO` (default).
+
+### Prometheus metrics
+
+Consumer exposes `/metrics` when `METRICS_PORT` is set:
+
+```bash
+curl -s localhost:9100/metrics | grep mrp_
+```
+
+Key metrics:
+
+| Metric | Type | Labels |
+|---|---|---|
+| `mrp_render_total` | Counter | `formula_id`, `status` |
+| `mrp_render_duration_seconds` | Histogram | `formula_id` |
+| `mrp_render_bytes` | Histogram | `formula_id`, `kind` (full/preview) |
+| `mrp_consumer_events_total` | Counter | `status` (ok/dlq/skipped) |
+| `mrp_consumer_retries_total` | Counter | — |
+| `mrp_consumer_processing_seconds` | Histogram | — |
+| `mrp_dlq_publish_total` | Counter | `reason` (parse/insert) |
+
+### OpenTelemetry tracing
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://localhost:4317`) and spans
+are exported via OTLP/gRPC to any backend (Jaeger, Tempo, Honeycomb).
+Without it, tracing is a no-op — safe to leave unset in development.
+
+Spans: `producer.publish` → `consumer.insert`, both carrying
+`render_id` and `formula_id` attributes.
+
+### Alerting
+
+Grafana provisioning lives in `grafana/provisioning/alerting/`:
+
+| Rule | Fires when |
+|---|---|
+| `mrp-freshness-1` | newest `render_events` row is more than 6h old |
+| `mrp-volume-1` | today's render volume below 20% of 14-day baseline |
+| `mrp-dlq-1` | consumer DLQ rate above 5/min for 2 min |
+
+Each alert carries a `runbook_url` pointing into `docs/runbooks/`.
+
+### Runbooks
+
+Five playbooks in `docs/runbooks/`:
+
+| Incident | File |
+|---|---|
+| Render table stale | [stale-freshness.md](docs/runbooks/stale-freshness.md) |
+| Consumer lag | [consumer-lag.md](docs/runbooks/consumer-lag.md) |
+| DLQ spike | [dlq-spike.md](docs/runbooks/dlq-spike.md) |
+| Postgres disk full | [postgres-disk-full.md](docs/runbooks/postgres-disk-full.md) |
+| High render runtime | [high-runtime.md](docs/runbooks/high-runtime.md) |
+
 ## Metadata Schema
 
 Table `render_events` (SQLite or Postgres):
@@ -221,6 +298,12 @@ params.csv ──▶ Renderer (NumPy) ──▶ PNG full + preview ──▶ fil
                                 │
                                 ├──▶ Postgres: render_events (idempotent)
                                 └──▶ render.events.dlq (poison / failure)
+
+Observability (all optional)
+    logs (JSON + correlation_id) ─▶ stdout
+    metrics (Prometheus) ─────────▶ :9100/metrics
+    traces (OTLP/gRPC) ───────────▶ $OTEL_EXPORTER_OTLP_ENDPOINT
+    alerts (Grafana) ─────────────▶ contact points
 ```
 
 Layers:
@@ -233,12 +316,14 @@ Layers:
 - **Producer** — Kafka publisher (`src/mrp/streaming/producer.py`).
 - **Consumer** — idempotent stream ingester with DLQ
   (`src/mrp/streaming/consumer.py`).
+- **Observability** — `src/mrp/observability/` (context, logging,
+  metrics, tracing).
 - **CLI** — `mrp run`, `mrp batch`, `mrp produce`, `mrp consume`, `mrp formulas`.
 - **DAG** — Airflow (`dags/render_pipeline_dag.py`).
 - **Transforms** — dbt models (`dbt/models/`).
 - **DQ runtime** — `data_quality/run_checks.py` (hand-rolled) +
   `data_quality/run_ge.py` (GE-style suite).
-- **Dashboards** — Grafana provisioning + `mrp.json`.
+- **Dashboards** — Grafana provisioning + `mrp.json` + `alerting/`.
 - **Demo** — Streamlit app (`app.py`).
 
 See [`docs/architecture.md`](docs/architecture.md) for the full diagram.
@@ -254,6 +339,7 @@ pip install -e ".[dev,streaming]"      # Kafka producer + consumer
 pip install -e ".[dev,migrations]"     # Alembic + SQLAlchemy + psycopg
 pip install -e ".[dev,dq]"             # Great Expectations
 pip install -e ".[dev,integration]"    # testcontainers (Docker)
+pip install -e ".[dev,observability]"  # Prometheus + OpenTelemetry
 
 cp .env.example .env
 # edit .env if you want Postgres, S3, or Kafka
@@ -270,7 +356,7 @@ Full stack (Docker Compose):
 
 ```bash
 docker compose up -d            # Postgres + Redpanda + MinIO + Grafana
-docker compose up -d consumer   # streaming consumer
+docker compose up -d consumer   # streaming consumer (metrics on :9100)
 ```
 
 ## Data quality
@@ -309,8 +395,9 @@ It exits 0 on pass, 1 on failure. Wired into the Airflow DAG as the
 ## Testing
 
 ```bash
-pytest -q                    # unit tests only (integration deselected)
-pytest -q -m integration     # requires Docker
+pytest -q                                # unit tests only (integration deselected)
+pytest -q -m integration                 # requires Docker
+pytest -q -o addopts="" -m integration   # force override config defaults
 ```
 
 Coverage:
@@ -334,24 +421,27 @@ Integration tests (`tests/integration/`, marked `integration`):
 - `test_kafka_pipeline.py` — Redpanda container; producer → consumer →
   metadata, end-to-end.
 
-They skip gracefully when Docker is unavailable, and run in CI as a
-dedicated job.
+The marker is applied at module level in each integration test file. They
+skip gracefully when Docker is unavailable, and run in CI as a dedicated
+job.
 
 ## CI
 
-GitHub Actions runs two jobs on every push and PR:
+GitHub Actions runs two jobs on every push and PR. Runs are cancelled on
+push to the same ref to avoid stacking.
 
 **test**
-1. `pip install -e ".[dev,streaming,migrations,dq]"`
+1. `pip install -e ".[dev,streaming,migrations,dq,observability]"`
 2. `ruff check src tests`
 3. `alembic upgrade head` (fresh SQLite) + `alembic current`
-4. `pytest -q` (unit)
+4. `pytest -q -o addopts="" -m "not integration"` (unit)
 5. Smoke render at 320×240
 
-**integration** (needs test)
-1. `pip install -e ".[dev,streaming,integration]"`
-2. `pytest -q -m integration tests/integration -v`
+**integration** (needs test, 15-min timeout)
+1. `pip install -e ".[dev,streaming,integration,observability]"`
+2. `pytest -q -o addopts="" -m integration tests/integration -v`
    — spins up Postgres 16 and Redpanda via testcontainers.
+   `TESTCONTAINERS_RYUK_DISABLED=true` avoids reaper hangs on GH runners.
 
 ## Visual Output
 
@@ -412,6 +502,9 @@ for a longer discussion. Summary:
 - **DLQ over retry-forever:** failed events don't block the consumer.
   Offset is committed after DLQ publish, so the stream moves forward while
   the failure is preserved for replay.
+- **Observability is opt-in:** every pillar (logs, metrics, traces, alerts)
+  defaults to off or no-op. Production enables them via env; local dev
+  doesn't pay the cost.
 
 ## Roadmap
 
@@ -426,19 +519,17 @@ for a longer discussion. Summary:
 - [x] Schema migration framework (Alembic) — SQLite + Postgres dialects
 - [x] Integration tests with testcontainers (real Kafka + Postgres)
 - [x] Great Expectations runtime wired into the DAG
+- [x] Structured JSON logs with correlation_id
+- [x] Prometheus `/metrics` endpoint on the consumer
+- [x] OpenTelemetry tracing (producer → consumer → DB)
+- [x] Grafana Alertmanager rules (freshness, volume, DLQ rate)
+- [x] Runbooks for common incidents (`docs/runbooks/`)
 - [x] Airflow DAG (`dags/render_pipeline_dag.py`)
 - [x] dbt models: `stg_renders → dim_formula / fct_render_events / agg_cost_daily`
 - [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB, events/min
 - [x] Docker Compose stack (Postgres + Redpanda + MinIO + Grafana)
 - [x] Terraform skeleton: S3 lifecycle tiering + RDS Postgres
 - [x] Live demo on Streamlit Cloud
-
-### Next — observability
-- [ ] Prometheus `/metrics` endpoint
-- [ ] OpenTelemetry tracing (producer → consumer → DB)
-- [ ] Structured JSON logs with correlation_id
-- [ ] Grafana Alertmanager rules (freshness, volume, DLQ rate)
-- [ ] Runbooks for common incidents (`docs/runbooks/`)
 
 ### Next — cost & benchmark
 - [ ] Benchmark: batch vs streaming throughput
