@@ -1,38 +1,50 @@
 """
 End-to-end: producer publishes, consumer reads, metadata records.
-
-Requires Docker (Redpanda container). Skipped otherwise.
 """
 from __future__ import annotations
 
-import importlib
-import os
 import sqlite3
+import time
 
 import pytest
 
 pytestmark = pytest.mark.integration
 
 
-def _reload_metadata(dsn: str, tmp_path):
-    os.environ["POSTGRES_DSN"] = dsn
-    os.environ["PARQUET_ROOT"] = str(tmp_path / "parquet")
-    os.environ["ARTIFACT_ROOT"] = str(tmp_path / "renders")
-    os.environ["USE_S3"] = "false"
+def _bind_dsn(dsn: str, tmp_path):
+    """Mutate mrp settings in place (see test_postgres_roundtrip)."""
+    from mrp import config, metadata
+    config.settings.postgres_dsn = dsn
+    config.settings.parquet_root = str(tmp_path / "parquet")
+    config.settings.artifact_root = str(tmp_path / "renders")
+    config.settings.use_s3 = False
+    return metadata
 
-    import mrp.config
-    importlib.reload(mrp.config)
-    import mrp.storage
-    importlib.reload(mrp.storage)
-    import mrp.metadata
-    importlib.reload(mrp.metadata)
-    return mrp.metadata
+
+def _wait_for_broker(bootstrap: str, timeout: float = 30.0) -> None:
+    """Block until the Kafka broker is reachable, or raise TimeoutError."""
+    from confluent_kafka.admin import AdminClient
+    admin = AdminClient({"bootstrap.servers": bootstrap})
+    deadline = time.time() + timeout
+    last_err: Exception | None = None
+    while time.time() < deadline:
+        try:
+            md = admin.list_topics(timeout=5.0)
+            if md.brokers:
+                return
+        except Exception as e:
+            last_err = e
+        time.sleep(1.0)
+    raise TimeoutError(f"broker {bootstrap} not ready after {timeout}s "
+                       f"(last error: {last_err})")
 
 
 def test_produce_consume_roundtrip(redpanda_container, tmp_path):
     bootstrap = redpanda_container.get_bootstrap_server()
+    _wait_for_broker(bootstrap)
 
-    meta = _reload_metadata("sqlite://" + str(tmp_path / "m.sqlite"), tmp_path)
+    dsn = f"sqlite://{tmp_path / 'm.sqlite'}"
+    meta = _bind_dsn(dsn, tmp_path)
     meta.init_db()
 
     from mrp.streaming import RenderConsumer, RenderProducer
@@ -55,11 +67,11 @@ def test_produce_consume_roundtrip(redpanda_container, tmp_path):
         "ingest_source": "stream",
     }
     producer.publish(event)
-    producer.flush()
+    producer.flush(timeout=5.0)
 
     consumer = RenderConsumer(bootstrap, TOPIC, "test-group",
                               dlq_topic=TOPIC + ".dlq", max_retries=2)
-    stats = consumer.run(max_messages=1)
+    stats = consumer.run(max_messages=1, timeout=5.0)
     assert stats["ok"] == 1
 
     con = sqlite3.connect(str(tmp_path / "m.sqlite"))

@@ -1,41 +1,30 @@
 """
 Real Postgres round-trip through the metadata layer.
-
-Runs `metadata.insert()` + `insert_event()` against a live Postgres, then
-reads back and asserts the schema, dedup, and Parquet partitioning.
 """
 from __future__ import annotations
-
-import importlib
-import os
 
 import pytest
 
 pytestmark = pytest.mark.integration
 
 
-def _reload_metadata(dsn: str, parquet_root: str, artifact_root: str):
-    """Reload mrp.config + mrp.metadata so they pick up the new DSN."""
-    os.environ["POSTGRES_DSN"] = dsn
-    os.environ["PARQUET_ROOT"] = parquet_root
-    os.environ["ARTIFACT_ROOT"] = artifact_root
-    os.environ["USE_S3"] = "false"
+def _bind_dsn(dsn: str, tmp_path):
+    """Point mrp at a fresh DSN without reloading modules.
 
-    import mrp.config
-    importlib.reload(mrp.config)
-    import mrp.storage
-    importlib.reload(mrp.storage)
-    import mrp.metadata
-    importlib.reload(mrp.metadata)
-    return mrp.metadata
+    Reloading breaks module-level references (consumer / renderer hold a
+    direct reference to `mrp.metadata`). Mutating settings in place keeps
+    every module consistent within a single test process.
+    """
+    from mrp import config, metadata
+    config.settings.postgres_dsn = dsn
+    config.settings.parquet_root = str(tmp_path / "parquet")
+    config.settings.artifact_root = str(tmp_path / "renders")
+    config.settings.use_s3 = False
+    return metadata
 
 
 def test_insert_and_query_postgres(postgres_dsn, tmp_path):
-    meta = _reload_metadata(
-        postgres_dsn,
-        str(tmp_path / "parquet"),
-        str(tmp_path / "renders"),
-    )
+    meta = _bind_dsn(postgres_dsn, tmp_path)
     meta.init_db()
 
     from mrp import storage as st
@@ -48,7 +37,8 @@ def test_insert_and_query_postgres(postgres_dsn, tmp_path):
     r.storage_uri, r.preview_uri = st.put(r.render_id, full, prev)
     meta.insert(r)
 
-    with __import__("psycopg").connect(postgres_dsn) as c:
+    import psycopg
+    with psycopg.connect(postgres_dsn) as c:
         row = c.execute(
             "SELECT formula_id, checksum, ingest_source "
             "FROM render_events WHERE render_id=%s",
@@ -62,11 +52,7 @@ def test_insert_and_query_postgres(postgres_dsn, tmp_path):
 
 
 def test_insert_event_idempotent_postgres(postgres_dsn, tmp_path):
-    meta = _reload_metadata(
-        postgres_dsn,
-        str(tmp_path / "parquet"),
-        str(tmp_path / "renders"),
-    )
+    meta = _bind_dsn(postgres_dsn, tmp_path)
     meta.init_db()
 
     ev = {
@@ -86,7 +72,8 @@ def test_insert_event_idempotent_postgres(postgres_dsn, tmp_path):
     meta.insert_event(ev)
     meta.insert_event(ev)
 
-    with __import__("psycopg").connect(postgres_dsn) as c:
+    import psycopg
+    with psycopg.connect(postgres_dsn) as c:
         n = c.execute(
             "SELECT count(*) FROM render_events WHERE render_id=%s",
             (ev["render_id"],),
