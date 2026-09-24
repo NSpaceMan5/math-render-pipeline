@@ -4,13 +4,15 @@ Real Postgres round-trip through the metadata layer.
 Runs `metadata.insert()` + `insert_event()` against a live Postgres, then
 reads back and asserts the schema, dedup, and Parquet partitioning.
 """
-
-import pytest
-
-pytestmark = pytest.mark.integration
+from __future__ import annotations
 
 import importlib
 import os
+
+import pytest
+
+
+pytestmark = pytest.mark.integration
 
 
 def _reload_metadata(dsn: str, parquet_root: str, artifact_root: str):
@@ -47,7 +49,6 @@ def test_insert_and_query_postgres(postgres_dsn, tmp_path):
     r.storage_uri, r.preview_uri = st.put(r.render_id, full, prev)
     meta.insert(r)
 
-    # batch path wrote ingest_source='batch'
     with __import__("psycopg").connect(postgres_dsn) as c:
         row = c.execute(
             "SELECT formula_id, checksum, ingest_source "
@@ -84,7 +85,7 @@ def test_insert_event_idempotent_postgres(postgres_dsn, tmp_path):
         "ingest_source": "stream",
     }
     meta.insert_event(ev)
-    meta.insert_event(ev)   # idempotent
+    meta.insert_event(ev)
 
     with __import__("psycopg").connect(postgres_dsn) as c:
         n = c.execute(

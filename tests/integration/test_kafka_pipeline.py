@@ -3,13 +3,16 @@ End-to-end: producer publishes, consumer reads, metadata records.
 
 Requires Docker (Redpanda container). Skipped otherwise.
 """
-
-import pytest
-
-pytestmark = pytest.mark.integration
+from __future__ import annotations
 
 import importlib
 import os
+import sqlite3
+
+import pytest
+
+
+pytestmark = pytest.mark.integration
 
 
 def _reload_metadata(dsn: str, tmp_path):
@@ -60,7 +63,6 @@ def test_produce_consume_roundtrip(redpanda_container, tmp_path):
     stats = consumer.run(max_messages=1)
     assert stats["ok"] == 1
 
-    import sqlite3
     con = sqlite3.connect(str(tmp_path / "m.sqlite"))
     n = con.execute(
         "SELECT count(*) FROM render_events WHERE render_id=?",
