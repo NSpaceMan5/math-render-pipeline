@@ -1,4 +1,4 @@
-.PHONY: up down logs test lint fmt render render-batch dq dq-strict clean
+.PHONY: up down logs test lint fmt render render-batch dq dq-strict ge migrate stamp integration clean
 
 up:        ; docker compose up -d
 down:      ; docker compose down
@@ -8,6 +8,10 @@ lint:      ; ruff check src tests
 fmt:       ; ruff format src tests
 dq:        ; python data_quality/run_checks.py
 dq-strict: ; python data_quality/run_checks.py --strict-integrity
+ge:        ; python data_quality/run_ge.py
+migrate:   ; alembic upgrade head
+stamp:     ; alembic stamp head
+integration: ; pytest -q -m integration tests/integration -v
 clean:     ; rm -rf data/ dbt/target dbt/logs .pytest_cache .ruff_cache
 
 render:

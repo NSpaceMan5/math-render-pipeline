@@ -1,0 +1,15 @@
+Alembic migrations for `render_events`.
+
+Usage
+-----
+    # fresh DB
+    alembic upgrade head
+
+    # existing DB (created by pre-Alembic code): mark as current, no-op
+    alembic stamp head
+
+    # new migration after a schema change
+    alembic revision -m "add column X"
+
+DSN is read from $POSTGRES_DSN (defaults to SQLite ./data/mrp.sqlite).
+Works with both SQLite and Postgres.

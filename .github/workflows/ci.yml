@@ -11,8 +11,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: pip install -e ".[dev,streaming]"
+      - run: pip install -e ".[dev,streaming,migrations,dq]"
       - run: ruff check src tests
+      - name: Alembic upgrade (fresh sqlite)
+        env:
+          POSTGRES_DSN: sqlite:///./data/ci_alembic.sqlite
+        run: |
+          alembic upgrade head
+          alembic current
+
       - name: Tests
         env:
           POSTGRES_DSN: sqlite:///./data/mrp.sqlite
@@ -25,3 +32,16 @@ jobs:
         run: |
           mrp run --formula polar_loom --width 320 --height 240 \
             --params '{"rings":12,"twist":2.0,"decay":2.0,"fold":1.0}'
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e ".[dev,streaming,integration]"
+      - name: Integration tests (Docker via testcontainers)
+        env:
+          USE_S3: "false"
+        run: pytest -q -m integration tests/integration -v
