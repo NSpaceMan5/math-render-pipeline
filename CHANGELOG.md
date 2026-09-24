@@ -5,6 +5,17 @@ Follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Streaming consumer: retry with exponential backoff, DLQ topic
+  (`render.events.dlq`), malformed-JSON poison-pill guard, correlation_id
+  in every log line
+- Data-quality runtime: freshness, volume, integrity checks
+  (`data_quality/run_checks.py`), soft-by-default with `--strict-integrity`
+- Property-based tests (Hypothesis) for all three formulas
+- DLQ unit tests (`tests/test_consumer_dlq.py`) — no Kafka required
+- `KAFKA_DLQ_TOPIC` and `KAFKA_MAX_RETRIES` env vars
+- `Makefile` target `dq-strict`
+
+### Added
 - Streaming layer: Kafka/Redpanda producer + consumer
 - `mrp run --stream`, `mrp produce`, `mrp consume`
 - `render_events.ingest_source` column with migration

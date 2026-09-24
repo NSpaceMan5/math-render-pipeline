@@ -133,6 +133,27 @@
           "format": "time_series"
         }
       ]
+    },
+    {
+      "id": 7,
+      "title": "Consumer retries / DLQ (last 24h)",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "MRP-Postgres"
+      },
+      "targets": [
+        {
+          "rawSql": "-- Requires consumer metrics persisted to a `consumer_metrics` table.\n-- Until then this panel renders zero; keep as a placeholder for the\n-- observability batch (Prometheus + structured logs).\nSELECT 0 AS value",
+          "format": "table"
+        }
+      ]
     }
   ]
 }

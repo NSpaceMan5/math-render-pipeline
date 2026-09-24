@@ -39,6 +39,8 @@ A data-engineering pipeline for parameterized image generation. Every render is:
   and unstructured. They are stored and queried separately.
 - **Streaming-capable** — batch path via CLI/DAG, streaming path via
   Kafka (Redpanda) producer + consumer. Idempotent on `render_id`.
+  Failed events go to a DLQ (`render.events.dlq`) with error + attempt
+  count; malformed JSON is quarantined without crashing the consumer.
 - **Tested** — pytest suite covering shape, dtype, determinism, checksum,
   parameter sensitivity, metadata idempotency, and schema migration.
 
@@ -123,6 +125,19 @@ mrp run --formula polar_loom --width 800 --height 600 \
 
 The consumer is idempotent on `render_id` — safe against Kafka re-delivery.
 The `ingest_source` column ('batch' or 'stream') distinguishes the two paths.
+
+### Reliability contract
+
+| Failure mode | Behaviour |
+|---|---|
+| Transient DB error | Retry with exponential backoff (default 3 attempts) |
+| Permanent DB error after retries | Publish to `render.events.dlq`, commit offset, continue |
+| Malformed JSON / missing fields | Quarantine to DLQ, commit offset, continue |
+| Consumer crash mid-batch | Uncommitted offsets replayed; `insert_event` dedups |
+
+Each DLQ payload contains `correlation_id`, `original_topic`, `error`,
+`attempts`, `raw`, `failed_at`. The consumer emits one `correlation_id`
+per event across all log lines for tracing.
 
 ## Metadata Schema
 
@@ -217,6 +232,26 @@ Full stack (Docker Compose):
 docker compose up -d            # Postgres + Redpanda + MinIO + Grafana
 docker compose up -d consumer   # streaming consumer
 ```
+
+## Data quality
+
+```bash
+python data_quality/run_checks.py                       # soft (default)
+python data_quality/run_checks.py --strict-integrity    # hard-fail on DB/Parquet divergence
+python data_quality/run_checks.py --max-age-hours 6 --min-today 3
+```
+
+Four tiers:
+
+| Tier | Checks |
+|---|---|
+| **schema** | non-null `render_id`, SHA-256 format, dimensions range, preview ≤ full |
+| **freshness** | newest render ≤ `--max-age-hours` old |
+| **volume** | at least `--min-today` renders today |
+| **integrity** | DB `render_id` set == Parquet `render_id` set (soft by default) |
+
+DB is the source of truth; Parquet is an analytics mirror with eventual
+consistency. Integrity divergence is a warning unless `--strict-integrity`.
 
 ## Testing
 

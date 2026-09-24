@@ -1,4 +1,4 @@
-.PHONY: up down logs test lint fmt render render-batch dq clean
+.PHONY: up down logs test lint fmt render render-batch dq dq-strict clean
 
 up:        ; docker compose up -d
 down:      ; docker compose down
@@ -7,6 +7,7 @@ test:      ; pytest -q
 lint:      ; ruff check src tests
 fmt:       ; ruff format src tests
 dq:        ; python data_quality/run_checks.py
+dq-strict: ; python data_quality/run_checks.py --strict-integrity
 clean:     ; rm -rf data/ dbt/target dbt/logs .pytest_cache .ruff_cache
 
 render:
