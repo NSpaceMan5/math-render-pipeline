@@ -24,7 +24,7 @@ jobs:
         env:
           POSTGRES_DSN: sqlite:///./data/mrp.sqlite
           USE_S3: "false"
-        run: pytest -q
+        run: pytest -q -m "not integration"
       - name: Smoke render
         env:
           POSTGRES_DSN: sqlite:///./data/mrp.sqlite

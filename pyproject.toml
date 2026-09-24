@@ -49,4 +49,3 @@ ignore = ["E501"]
 markers = [
   "integration: tests requiring Docker (testcontainers)",
 ]
-addopts = "-m 'not integration'"
