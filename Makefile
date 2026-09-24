@@ -12,6 +12,7 @@ ge:        ; python data_quality/run_ge.py
 migrate:   ; alembic upgrade head
 stamp:     ; alembic stamp head
 integration: ; pytest -q -m integration tests/integration -v
+metrics:   ; curl -s localhost:9100/metrics | grep mrp_
 clean:     ; rm -rf data/ dbt/target dbt/logs .pytest_cache .ruff_cache
 
 render:

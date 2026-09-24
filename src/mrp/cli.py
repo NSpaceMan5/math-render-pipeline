@@ -10,9 +10,15 @@ import typer
 from . import metadata, storage
 from .evaluators import registry
 from .models import RenderSpec
+from .observability import init_tracing, setup_logging
 from .renderer import render
 
 app = typer.Typer(add_completion=False)
+
+
+def _bootstrap_observability() -> None:
+    setup_logging()
+    init_tracing("mrp-cli")
 
 
 def _maybe_publish(result) -> None:
@@ -31,6 +37,7 @@ def _maybe_publish(result) -> None:
 
 @app.command("formulas")
 def list_formulas():
+    _bootstrap_observability()
     for name in registry.available():
         typer.echo(f"- {name}  defaults={registry.defaults(name)}")
 
@@ -43,6 +50,7 @@ def run(
     params: str = typer.Option("{}"),
     stream: bool = typer.Option(False),
 ):
+    _bootstrap_observability()
     metadata.init_db()
     spec = RenderSpec(formula_id=formula, width=width, height=height,
                       params=json.loads(params))
@@ -60,6 +68,7 @@ def run(
 
 @app.command("batch")
 def batch(csv: Path = typer.Option(..., exists=True)):
+    _bootstrap_observability()
     metadata.init_db()
     df = pd.read_csv(csv)
     for _, row in df.iterrows():
@@ -82,6 +91,7 @@ def produce(
     bootstrap: str = typer.Option("localhost:9092", envvar="KAFKA_BOOTSTRAP"),
     topic: str = typer.Option("render.events", envvar="KAFKA_TOPIC"),
 ):
+    _bootstrap_observability()
     from .streaming import RenderProducer, event_from_result
     metadata.init_db()
     producer = RenderProducer(bootstrap, topic)
@@ -108,6 +118,7 @@ def consume(
     group: str = typer.Option("mrp-consumer", envvar="KAFKA_GROUP"),
     max_messages: int = typer.Option(0),
 ):
+    _bootstrap_observability()
     from .streaming import RenderConsumer
     c = RenderConsumer(bootstrap, topic, group)
     n = c.run(max_messages=max_messages or None)

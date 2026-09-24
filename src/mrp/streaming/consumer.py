@@ -18,9 +18,19 @@ import os
 import signal
 import sys
 import time
-import uuid
 
 from .. import metadata
+from ..observability import (
+    consumer_processing_seconds,
+    consumer_retries_total,
+    dlq_publish_total,
+    init_tracing,
+    new_correlation_id,
+    observe_consumer_event,
+    setup_logging,
+    start_metrics_server,
+    traced,
+)
 
 log = logging.getLogger("mrp.streaming.consumer")
 
@@ -86,7 +96,11 @@ class RenderConsumer:
                           value=json.dumps(payload).encode("utf-8"))
         self._dlq.poll(0)
         self._stats["dlq"] += 1
-        log.warning("cid=%s -> DLQ (%s, attempts=%d)", cid, error, attempts)
+        reason = "parse" if error.startswith("parse:") else "insert"
+        dlq_publish_total.labels(reason=reason).inc()
+        observe_consumer_event("dlq")
+        log.warning("dlq published: %s (attempts=%d)", error, attempts,
+                    extra={"render_id": None, "event": "dlq"})
 
     def _insert_with_retry(self, event: dict, cid: str) -> None:
         last: Exception | None = None
@@ -97,6 +111,7 @@ class RenderConsumer:
             except Exception as e:
                 last = e
                 self._stats["retries"] += 1
+                consumer_retries_total.inc()
                 wait = self._backoff_base * (2 ** (attempt - 1))
                 log.warning("cid=%s attempt=%d/%d failed: %s (retry in %.2fs)",
                             cid, attempt, self._max_retries, e, wait)
@@ -105,7 +120,10 @@ class RenderConsumer:
         assert last is not None
         raise last
 
-    def run(self, max_messages: int | None = None, timeout: float = 1.0) -> dict:
+    def run(self, max_messages: int | None = None, timeout: float = 1.0,
+            metrics_port: int | None = None) -> dict:
+        if metrics_port:
+            start_metrics_server(port=metrics_port)
         metadata.init_db()
         n = 0
         try:
@@ -120,8 +138,9 @@ class RenderConsumer:
                         continue
                     raise RuntimeError(msg.error())
 
-                cid = uuid.uuid4().hex[:12]
+                cid = new_correlation_id()
                 raw = msg.value()
+                t0 = time.perf_counter()
 
                 try:
                     event = json.loads(raw.decode("utf-8"))
@@ -141,15 +160,20 @@ class RenderConsumer:
                     continue
 
                 try:
-                    self._insert_with_retry(event, cid)
+                    with traced("consumer.insert", {"render_id": event["render_id"],
+                                                    "formula_id": event["formula_id"]}):
+                        self._insert_with_retry(event, cid)
                     self._consumer.commit(msg)
                     self._stats["ok"] += 1
-                    log.info("cid=%s render_id=%s formula=%s",
-                             cid, event["render_id"], event["formula_id"])
+                    observe_consumer_event("ok")
+                    consumer_processing_seconds.observe(time.perf_counter() - t0)
+                    log.info("ingested render_id=%s formula=%s",
+                             event["render_id"], event["formula_id"])
                 except Exception as e:
                     self._to_dlq(raw, f"insert: {e}", self._max_retries, cid)
                     self._consumer.commit(msg)
                     self._stats["skipped"] += 1
+                    observe_consumer_event("skipped")
 
                 n += 1
                 if max_messages and n >= max_messages:
@@ -161,10 +185,8 @@ class RenderConsumer:
 
 
 def main():
-    logging.basicConfig(
-        level=os.environ.get("LOG_LEVEL", "INFO"),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    setup_logging()
+    init_tracing("mrp-consumer")
     bootstrap = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
     topic     = os.environ.get("KAFKA_TOPIC", "render.events")
     group     = os.environ.get("KAFKA_GROUP", "mrp-consumer")
@@ -176,9 +198,10 @@ def main():
     signal.signal(signal.SIGINT, c.stop)
     signal.signal(signal.SIGTERM, c.stop)
 
-    log.info("consuming %s from %s (group=%s, dlq=%s)",
-             topic, bootstrap, group, dlq or topic + DLQ_SUFFIX)
-    stats = c.run()
+    metrics_port = int(os.environ.get("METRICS_PORT", "0")) or None
+    log.info("consuming %s from %s (group=%s, dlq=%s, metrics_port=%s)",
+             topic, bootstrap, group, dlq or topic + DLQ_SUFFIX, metrics_port)
+    stats = c.run(metrics_port=metrics_port)
     log.info("stats: %s", stats)
     sys.exit(0)
 

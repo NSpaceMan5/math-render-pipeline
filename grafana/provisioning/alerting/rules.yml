@@ -1,0 +1,101 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: mrp-freshness
+    folder: MRP
+    interval: 1m
+    rules:
+      - uid: mrp-freshness-1
+        title: Render freshness > 6h
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: MRP-Postgres
+            model:
+              rawSql: SELECT max(created_at) AS newest FROM render_events
+              format: table
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [21600] }
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        labels: { severity: warning, team: data }
+        annotations:
+          summary: "MRP render_events is stale"
+          runbook_url: https://github.com/WoodinGlass/math-render-pipeline/blob/main/docs/runbooks/stale-freshness.md
+
+  - orgId: 1
+    name: mrp-volume
+    folder: MRP
+    interval: 5m
+    rules:
+      - uid: mrp-volume-1
+        title: Daily render volume dropped > 80 percent
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 172800, to: 0 }
+            datasourceUid: MRP-Postgres
+            model:
+              rawSql: |
+                WITH d AS (
+                  SELECT date_trunc('day', created_at)::date AS day,
+                         count(*) AS n
+                  FROM render_events
+                  GROUP BY 1 ORDER BY 1 DESC LIMIT 14
+                )
+                SELECT
+                  (SELECT n FROM d OFFSET 0) AS today,
+                  (SELECT avg(n) FROM d OFFSET 1) AS baseline
+              format: table
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: lt, params: [0.2] }
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        labels: { severity: warning, team: data }
+        annotations:
+          summary: "MRP daily render volume collapsed"
+          runbook_url: https://github.com/WoodinGlass/math-render-pipeline/blob/main/docs/runbooks/stale-freshness.md
+
+  - orgId: 1
+    name: mrp-dlq
+    folder: MRP
+    interval: 1m
+    rules:
+      - uid: mrp-dlq-1
+        title: Consumer DLQ rate > 5 per min
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: MRP-Postgres
+            model:
+              rawSql: |
+                SELECT 0 AS value
+              format: table
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [5] }
+        noDataState: OK
+        execErrState: OK
+        for: 2m
+        labels: { severity: critical, team: data }
+        annotations:
+          summary: "MRP consumer DLQ spike"
+          runbook_url: https://github.com/WoodinGlass/math-render-pipeline/blob/main/docs/runbooks/dlq-spike.md
