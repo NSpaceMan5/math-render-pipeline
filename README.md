@@ -263,20 +263,26 @@ Coverage:
 
 - `test_evaluators.py`, `test_harmonic_grid.py`, `test_moire_grid.py` — output
   shape/dtype, determinism, parameter sensitivity, non-blank check.
+- `test_properties.py` — Hypothesis invariants for all three formulas:
+  determinism across *any* valid parameter set, non-degenerate output.
 - `test_renderer.py` — hash stability, checksum format, preview < full.
 - `test_registry.py` — plural registry, defaults present, unknown raises.
 - `test_metadata.py` — insert + query round-trip, Parquet output.
 - `test_streaming_schemas.py` — event round-trip through Pydantic.
 - `test_streaming_metadata.py` — idempotent insert, migration adds column.
+- `test_consumer_dlq.py` — DLQ routing, retry semantics, poison-pill guard
+  (no Kafka required; uses monkeypatched producer).
 
 ## CI
 
 GitHub Actions runs on every push and PR:
 
-1. `pip install -e ".[dev]"`
+1. `pip install -e ".[dev,streaming]"`
 2. `ruff check src tests`
 3. `pytest -q`
 4. Smoke render at 320×240
+
+The `streaming` extra installs `confluent-kafka` so DLQ tests run in CI.
 
 ## Visual Output
 
@@ -334,20 +340,50 @@ for a longer discussion. Summary:
 - **Right tool when:** reproducibility is a hard requirement, sweeps
   matter, artifacts must be diffable.
 - **Wrong tool when:** photorealism or interactive latency is required.
+- **DLQ over retry-forever:** failed events don't block the consumer.
+  Offset is committed after DLQ publish, so the stream moves forward while
+  the failure is preserved for replay.
 
 ## Roadmap
 
-- [x] Second formula (`harmonic_grid`) to prove registry pluralism
-- [x] Third formula (`moire_grid`) — interference family
-- [x] Streaming layer (Kafka/Redpanda producer + consumer)
+### Done
+- [x] Three formulas (`polar_loom`, `harmonic_grid`, `moire_grid`)
+- [x] Batch + streaming ingestion (Kafka/Redpanda producer + consumer)
+- [x] Streaming reliability: retry w/ backoff, DLQ, poison-pill guard,
+      correlation_id in every log line
+- [x] Data-quality runtime: schema + freshness + volume + integrity
+      (soft by default, `--strict-integrity` for hard fail)
+- [x] Property-based tests (Hypothesis) for all three formulas
 - [x] Airflow DAG (`dags/render_pipeline_dag.py`)
 - [x] dbt models: `stg_renders → dim_formula / fct_render_events / agg_cost_daily`
 - [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB, events/min
 - [x] Docker Compose stack (Postgres + Redpanda + MinIO + Grafana)
 - [x] Terraform skeleton: S3 lifecycle tiering + RDS Postgres
 - [x] Live demo on Streamlit Cloud
-- [ ] Great Expectations runtime checks wired into the DAG
-- [ ] Fourth formula (`lissajous_web` or `harmonograph`)
+
+### Next — correctness & scale
+- [ ] Schema migration framework (Alembic)
+- [ ] Integration tests with testcontainers (real Kafka + Postgres)
+- [ ] Great Expectations runtime wired into the DAG
+
+### Next — observability
+- [ ] Prometheus `/metrics` endpoint
+- [ ] OpenTelemetry tracing (producer → consumer → DB)
+- [ ] Structured JSON logs with correlation_id
+- [ ] Grafana Alertmanager rules (freshness, volume, DLQ rate)
+- [ ] Runbooks for common incidents (`docs/runbooks/`)
+
+### Next — cost & benchmark
+- [ ] Benchmark: batch vs streaming throughput
+- [ ] Cost model: $ per 1000 renders
+- [ ] Scale test: 10k renders, find the bottleneck
+- [ ] Backfill test: 30 days × 5 specs
+
+### Stretch
+- [ ] Fourth formula (`lissajous_web` / `harmonograph`)
+- [ ] Multi-cloud IaC (AWS + GCP)
+- [ ] OpenLineage + Marquez for lineage
+- [ ] Spot instances (AWS Batch) for renderer
 
 ## License
 
