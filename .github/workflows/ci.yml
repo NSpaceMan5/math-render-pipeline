@@ -62,7 +62,7 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e ".[dev,streaming,integration,observability]"
+        run: pip install -e ".[dev,streaming,integration,observability,migrations]"
 
       - name: Prepare workspace
         run: mkdir -p data

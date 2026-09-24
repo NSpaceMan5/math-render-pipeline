@@ -43,7 +43,7 @@ def test_produce_consume_roundtrip(redpanda_container, tmp_path):
     bootstrap = redpanda_container.get_bootstrap_server()
     _wait_for_broker(bootstrap)
 
-    dsn = f"sqlite://{tmp_path / 'm.sqlite'}"
+    dsn = f"sqlite:///{tmp_path / 'm.sqlite'}"
     meta = _bind_dsn(dsn, tmp_path)
     meta.init_db()
 
