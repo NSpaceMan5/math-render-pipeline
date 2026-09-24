@@ -41,8 +41,11 @@ A data-engineering pipeline for parameterized image generation. Every render is:
   Kafka (Redpanda) producer + consumer. Idempotent on `render_id`.
   Failed events go to a DLQ (`render.events.dlq`) with error + attempt
   count; malformed JSON is quarantined without crashing the consumer.
+- **Migratable** — Alembic-managed schema, works with SQLite and Postgres.
+  `alembic upgrade head` is idempotent and safe on existing DBs.
 - **Tested** — pytest suite covering shape, dtype, determinism, checksum,
-  parameter sensitivity, metadata idempotency, and schema migration.
+  parameter sensitivity, metadata idempotency, schema migration, and
+  integration tests against real Postgres + Kafka via testcontainers.
 
 ## Available Formulas
 
@@ -56,6 +59,16 @@ A data-engineering pipeline for parameterized image generation. Every render is:
 - *RGB* = 8-bit unsigned, shape `(H, W, 3)`
 - *Params* = keyword arguments passed to the evaluator
 - New formulas register in `src/mrp/evaluators/registry.py`
+
+### Default parameters
+
+| Formula | Defaults |
+|---|---|
+| `polar_loom` | `rings=28, twist=2.7, decay=2.1, fold=1.15` |
+| `harmonic_grid` | `nx=6, ny=4, phase=0.0, skew=0.0, mix=0.5` |
+| `moire_grid` | `f1=22.0, f2=22.6, angle=0.06, mix=0.5, sharpen=1.4` |
+
+Run `mrp formulas` for the live registry.
 
 ## Quick Start
 
@@ -161,6 +174,26 @@ Table `render_events` (SQLite or Postgres):
 
 Parquet mirror is partitioned by `formula_hash[:16]` and written with ZSTD.
 
+## Schema migrations
+
+```bash
+alembic upgrade head      # apply all migrations
+alembic current           # show current revision
+alembic stamp head        # mark existing DB as current (no-op migration)
+```
+
+DSN is read from `$POSTGRES_DSN` (SQLite or Postgres). Migrations are
+idempotent: `CREATE TABLE / INDEX IF NOT EXISTS` so the initial revision
+applies cleanly on databases created by the pre-Alembic code path.
+
+Migration files live in `migrations/versions/`. To add one:
+
+```bash
+alembic revision -m "add column X"
+# edit the generated file
+alembic upgrade head
+```
+
 ## Determinism Contract
 
 | Artifact       | How                                                          |
@@ -186,8 +219,8 @@ params.csv ──▶ Renderer (NumPy) ──▶ PNG full + preview ──▶ fil
                                 ▼
                         Consumer (group: mrp-consumer)
                                 │
-                                ▼
-                        Postgres: render_events (idempotent)
+                                ├──▶ Postgres: render_events (idempotent)
+                                └──▶ render.events.dlq (poison / failure)
 ```
 
 Layers:
@@ -196,11 +229,15 @@ Layers:
 - **Renderer** — wraps evaluator, produces bytes, computes checksum.
 - **Storage** — filesystem or S3/MinIO, selected by `USE_S3`.
 - **Metadata** — SQLite or Postgres, selected by `POSTGRES_DSN` scheme.
+- **Migrations** — Alembic (`migrations/`), SQLite + Postgres dialects.
 - **Producer** — Kafka publisher (`src/mrp/streaming/producer.py`).
-- **Consumer** — idempotent stream ingester (`src/mrp/streaming/consumer.py`).
+- **Consumer** — idempotent stream ingester with DLQ
+  (`src/mrp/streaming/consumer.py`).
 - **CLI** — `mrp run`, `mrp batch`, `mrp produce`, `mrp consume`, `mrp formulas`.
 - **DAG** — Airflow (`dags/render_pipeline_dag.py`).
 - **Transforms** — dbt models (`dbt/models/`).
+- **DQ runtime** — `data_quality/run_checks.py` (hand-rolled) +
+  `data_quality/run_ge.py` (GE-style suite).
 - **Dashboards** — Grafana provisioning + `mrp.json`.
 - **Demo** — Streamlit app (`app.py`).
 
@@ -212,8 +249,11 @@ See [`docs/architecture.md`](docs/architecture.md) for the full diagram.
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Optional: streaming support
-pip install -e ".[dev,streaming]"
+# Optional extras
+pip install -e ".[dev,streaming]"      # Kafka producer + consumer
+pip install -e ".[dev,migrations]"     # Alembic + SQLAlchemy + psycopg
+pip install -e ".[dev,dq]"             # Great Expectations
+pip install -e ".[dev,integration]"    # testcontainers (Docker)
 
 cp .env.example .env
 # edit .env if you want Postgres, S3, or Kafka
@@ -235,13 +275,21 @@ docker compose up -d consumer   # streaming consumer
 
 ## Data quality
 
+Two independent runtimes:
+
+| Tool | Style | Use case |
+|---|---|---|
+| `data_quality/run_checks.py` | hand-rolled checks | fast local + CI |
+| `data_quality/run_ge.py`     | GE-style suite from JSON | contract-style, shareable |
+
 ```bash
 python data_quality/run_checks.py                       # soft (default)
 python data_quality/run_checks.py --strict-integrity    # hard-fail on DB/Parquet divergence
 python data_quality/run_checks.py --max-age-hours 6 --min-today 3
+python data_quality/run_ge.py                           # GE suite
 ```
 
-Four tiers:
+Four tiers in `run_checks.py`:
 
 | Tier | Checks |
 |---|---|
@@ -253,10 +301,16 @@ Four tiers:
 DB is the source of truth; Parquet is an analytics mirror with eventual
 consistency. Integrity divergence is a warning unless `--strict-integrity`.
 
+`run_ge.py` loads rows into a pandas DataFrame and applies every
+expectation in `great_expectations/expectations/renders_suite.json`.
+It exits 0 on pass, 1 on failure. Wired into the Airflow DAG as the
+`great_expectations` task between `data_quality` and `dbt_run`.
+
 ## Testing
 
 ```bash
-pytest -q
+pytest -q                    # unit tests only (integration deselected)
+pytest -q -m integration     # requires Docker
 ```
 
 Coverage:
@@ -273,16 +327,31 @@ Coverage:
 - `test_consumer_dlq.py` — DLQ routing, retry semantics, poison-pill guard
   (no Kafka required; uses monkeypatched producer).
 
+Integration tests (`tests/integration/`, marked `integration`):
+
+- `test_postgres_roundtrip.py` — real Postgres via testcontainers;
+  `insert()` and `insert_event()` round-trip + dedup.
+- `test_kafka_pipeline.py` — Redpanda container; producer → consumer →
+  metadata, end-to-end.
+
+They skip gracefully when Docker is unavailable, and run in CI as a
+dedicated job.
+
 ## CI
 
-GitHub Actions runs on every push and PR:
+GitHub Actions runs two jobs on every push and PR:
 
-1. `pip install -e ".[dev,streaming]"`
+**test**
+1. `pip install -e ".[dev,streaming,migrations,dq]"`
 2. `ruff check src tests`
-3. `pytest -q`
-4. Smoke render at 320×240
+3. `alembic upgrade head` (fresh SQLite) + `alembic current`
+4. `pytest -q` (unit)
+5. Smoke render at 320×240
 
-The `streaming` extra installs `confluent-kafka` so DLQ tests run in CI.
+**integration** (needs test)
+1. `pip install -e ".[dev,streaming,integration]"`
+2. `pytest -q -m integration tests/integration -v`
+   — spins up Postgres 16 and Redpanda via testcontainers.
 
 ## Visual Output
 
@@ -354,17 +423,15 @@ for a longer discussion. Summary:
 - [x] Data-quality runtime: schema + freshness + volume + integrity
       (soft by default, `--strict-integrity` for hard fail)
 - [x] Property-based tests (Hypothesis) for all three formulas
+- [x] Schema migration framework (Alembic) — SQLite + Postgres dialects
+- [x] Integration tests with testcontainers (real Kafka + Postgres)
+- [x] Great Expectations runtime wired into the DAG
 - [x] Airflow DAG (`dags/render_pipeline_dag.py`)
 - [x] dbt models: `stg_renders → dim_formula / fct_render_events / agg_cost_daily`
 - [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB, events/min
 - [x] Docker Compose stack (Postgres + Redpanda + MinIO + Grafana)
 - [x] Terraform skeleton: S3 lifecycle tiering + RDS Postgres
 - [x] Live demo on Streamlit Cloud
-
-### Next — correctness & scale
-- [ ] Schema migration framework (Alembic)
-- [ ] Integration tests with testcontainers (real Kafka + Postgres)
-- [ ] Great Expectations runtime wired into the DAG
 
 ### Next — observability
 - [ ] Prometheus `/metrics` endpoint
