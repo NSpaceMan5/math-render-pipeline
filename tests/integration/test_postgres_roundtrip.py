@@ -4,6 +4,11 @@ Real Postgres round-trip through the metadata layer.
 Runs `metadata.insert()` + `insert_event()` against a live Postgres, then
 reads back and asserts the schema, dedup, and Parquet partitioning.
 """
+
+import pytest
+
+pytestmark = pytest.mark.integration
+
 import importlib
 import os
 

@@ -3,6 +3,11 @@ End-to-end: producer publishes, consumer reads, metadata records.
 
 Requires Docker (Redpanda container). Skipped otherwise.
 """
+
+import pytest
+
+pytestmark = pytest.mark.integration
+
 import importlib
 import os
 
