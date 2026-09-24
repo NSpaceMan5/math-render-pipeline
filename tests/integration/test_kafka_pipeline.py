@@ -11,7 +11,6 @@ import sqlite3
 
 import pytest
 
-
 pytestmark = pytest.mark.integration
 
 
