@@ -46,6 +46,9 @@ A data-engineering pipeline for parameterized image generation. Every render is:
 - **Observable** — structured JSON logs with `correlation_id`, Prometheus
   `/metrics` endpoint, OpenTelemetry tracing, Grafana alerts, and 5
   incident runbooks.
+- **Benchmarked** — batch, streaming, scale, and backfill benchmarks plus a
+  cost model in `benchmarks/`; JSON reports written to
+  `benchmarks/results/`.
 - **Tested** — pytest suite covering shape, dtype, determinism, checksum,
   parameter sensitivity, metadata idempotency, schema migration, DLQ
   semantics, and integration tests against real Postgres + Kafka via
@@ -229,6 +232,48 @@ Five playbooks in `docs/runbooks/`:
 | Postgres disk full | [postgres-disk-full.md](docs/runbooks/postgres-disk-full.md) |
 | High render runtime | [high-runtime.md](docs/runbooks/high-runtime.md) |
 
+## Benchmarking
+
+Four benchmark scripts under `benchmarks/` measure throughput, cost, and
+scale characteristics. Each writes a JSON report to `benchmarks/results/`
+(ignored by git).
+
+```bash
+make bench            # batch throughput (default 200 renders)
+make bench-stream     # producer -> consumer pipeline (in-memory)
+make bench-scale      # 10k renders, per-stage breakdown
+make bench-backfill   # 30 days x 5 specs, projected monthly time
+make cost             # $ per 1000 renders (reads last bench)
+make bench-all        # run all of the above in sequence
+```
+
+### What they measure
+
+| Benchmark | Question answered |
+|---|---|
+| `bench_batch` | renders/sec through render + storage + metadata + parquet |
+| `bench_streaming` | producer and consumer rates; end-to-end pipeline |
+| `bench_scale` | which stage is the bottleneck at 10k renders |
+| `bench_backfill` | how long to backfill one month of daily runs |
+| `cost_model` | USD per 1000 renders, on-demand vs spot |
+
+`bench_streaming` runs an in-memory queue by default. Set
+`KAFKA_BOOTSTRAP=localhost:9092` (with `docker compose up -d redpanda`) to
+exercise the real broker path.
+
+### Cost model
+
+`cost_model.py` reads the last `batch` benchmark and applies AWS prices
+for compute (`c6i.large`), S3 storage and PUTs, and RDS. Two scenarios:
+
+| Scenario | Compute | Storage class |
+|---|---|---|
+| on-demand | c6i.large @ $0.085/hr | S3 Standard |
+| spot | c6i.large @ $0.025/hr | S3 Glacier IR |
+
+Update `benchmarks/cost_model.py::PRICES` to reflect current rates or a
+different region. Numbers are illustrative, not a commitment.
+
 ## Metadata Schema
 
 Table `render_events` (SQLite or Postgres):
@@ -304,6 +349,10 @@ Observability (all optional)
     metrics (Prometheus) ─────────▶ :9100/metrics
     traces (OTLP/gRPC) ───────────▶ $OTEL_EXPORTER_OTLP_ENDPOINT
     alerts (Grafana) ─────────────▶ contact points
+
+Benchmarks (offline)
+    bench_batch / bench_streaming / bench_scale / bench_backfill
+        └──▶ benchmarks/results/*.json ──▶ cost_model
 ```
 
 Layers:
@@ -318,6 +367,7 @@ Layers:
   (`src/mrp/streaming/consumer.py`).
 - **Observability** — `src/mrp/observability/` (context, logging,
   metrics, tracing).
+- **Benchmarks** — `benchmarks/` (batch, streaming, scale, backfill, cost).
 - **CLI** — `mrp run`, `mrp batch`, `mrp produce`, `mrp consume`, `mrp formulas`.
 - **DAG** — Airflow (`dags/render_pipeline_dag.py`).
 - **Transforms** — dbt models (`dbt/models/`).
@@ -435,10 +485,11 @@ push to the same ref to avoid stacking.
 2. `ruff check src tests`
 3. `alembic upgrade head` (fresh SQLite) + `alembic current`
 4. `pytest -q -o addopts="" -m "not integration"` (unit)
-5. Smoke render at 320×240
+5. Benchmark smoke: `bench_batch --n 100` + `cost_model`
+6. Smoke render at 320×240
 
 **integration** (needs test, 15-min timeout)
-1. `pip install -e ".[dev,streaming,integration,observability]"`
+1. `pip install -e ".[dev,streaming,integration,observability,migrations]"`
 2. `pytest -q -o addopts="" -m integration tests/integration -v`
    — spins up Postgres 16 and Redpanda via testcontainers.
    `TESTCONTAINERS_RYUK_DISABLED=true` avoids reaper hangs on GH runners.
@@ -505,6 +556,9 @@ for a longer discussion. Summary:
 - **Observability is opt-in:** every pillar (logs, metrics, traces, alerts)
   defaults to off or no-op. Production enables them via env; local dev
   doesn't pay the cost.
+- **Benchmarks are offline:** they write JSON to a git-ignored directory.
+  They are descriptive, not prescriptive — numbers depend on the machine
+  they run on.
 
 ## Roadmap
 
@@ -524,18 +578,16 @@ for a longer discussion. Summary:
 - [x] OpenTelemetry tracing (producer → consumer → DB)
 - [x] Grafana Alertmanager rules (freshness, volume, DLQ rate)
 - [x] Runbooks for common incidents (`docs/runbooks/`)
+- [x] Benchmark: batch vs streaming throughput
+- [x] Cost model: $ per 1000 renders
+- [x] Scale test: 10k renders, per-stage bottleneck
+- [x] Backfill test: 30 days x 5 specs
 - [x] Airflow DAG (`dags/render_pipeline_dag.py`)
 - [x] dbt models: `stg_renders → dim_formula / fct_render_events / agg_cost_daily`
 - [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB, events/min
 - [x] Docker Compose stack (Postgres + Redpanda + MinIO + Grafana)
 - [x] Terraform skeleton: S3 lifecycle tiering + RDS Postgres
 - [x] Live demo on Streamlit Cloud
-
-### Next — cost & benchmark
-- [ ] Benchmark: batch vs streaming throughput
-- [ ] Cost model: $ per 1000 renders
-- [ ] Scale test: 10k renders, find the bottleneck
-- [ ] Backfill test: 30 days × 5 specs
 
 ### Stretch
 - [ ] Fourth formula (`lissajous_web` / `harmonograph`)
