@@ -21,3 +21,7 @@ infra/terraform/*.tfstate*
 !demo_data/renders.parquet
 !demo_data/thumbs/
 !demo_data/thumbs/*.png
+
+# benchmark outputs
+benchmarks/results/*.json
+!benchmarks/results/.gitkeep
