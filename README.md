@@ -46,6 +46,8 @@ A data-engineering pipeline for parameterized image generation. Every render is:
 - **Observable** — structured JSON logs with `correlation_id`, Prometheus
   `/metrics` endpoint, OpenTelemetry tracing, Grafana alerts, and 5
   incident runbooks.
+- **Lineage-aware** — OpenLineage events for every render and consume,
+  viewable in Marquez; no-op unless `OPENLINEAGE_URL` is set.
 - **Benchmarked** — batch, streaming, scale, and backfill benchmarks plus a
   cost model in `benchmarks/`; JSON reports written to
   `benchmarks/results/`.
@@ -53,8 +55,8 @@ A data-engineering pipeline for parameterized image generation. Every render is:
   matched resource mapping, identical outputs.
 - **Tested** — pytest suite covering shape, dtype, determinism, checksum,
   parameter sensitivity, metadata idempotency, schema migration, DLQ
-  semantics, and integration tests against real Postgres + Kafka via
-  testcontainers.
+  semantics, lineage emitter, and integration tests against real Postgres
+  + Kafka via testcontainers.
 
 ## Available Formulas
 
@@ -236,6 +238,33 @@ Five playbooks in `docs/runbooks/`:
 | Postgres disk full | [postgres-disk-full.md](docs/runbooks/postgres-disk-full.md) |
 | High render runtime | [high-runtime.md](docs/runbooks/high-runtime.md) |
 
+## Data lineage
+
+OpenLineage events for every render and every ingested stream event,
+viewable in [Marquez](https://marquezproject.ai/). See
+[`docs/lineage.md`](docs/lineage.md).
+
+```bash
+# Start Marquez + UI
+docker compose up -d marquez-db marquez marquez-web
+
+# Enable lineage in the app
+export OPENLINEAGE_URL=http://localhost:5000
+mrp run --formula polar_loom --width 400 --height 300
+```
+
+Marquez UI: <http://localhost:8888> — namespace `mrp`, jobs `render` and
+`consume`, one dataset per spec hash and per render.
+
+| Job | Event type | Inputs | Outputs |
+|---|---|---|---|
+| `render` | START / COMPLETE / FAIL | `spec/<formula>/<hash>` | `renders/<id>`, storage URI |
+| `consume` | COMPLETE | `topic/render.events` | `table/render_events/<id>` |
+
+Lineage is **best-effort**: unset `OPENLINEAGE_URL` and the emitter becomes
+a no-op; if Marquez is down, emit failures log a warning and never
+propagate.
+
 ## Benchmarking
 
 Four benchmark scripts under `benchmarks/` measure throughput, cost, and
@@ -408,6 +437,7 @@ alembic upgrade head
 | `checksum`     | SHA-256 of the PNG payload                                   |
 | `render_id`    | `formula_hash[:16]` + `uuid4()[:8]` (collision-free inserts) |
 | Stream event   | Kafka key = `render_id`; consumer idempotent on same field   |
+| Lineage runId  | `uuid4()` for render, `uuid5(URL, external_id)` if coerced   |
 
 Implication: the same spec always produces the same bytes; different runs
 produce distinct `render_id`s so every render is preserved as an event.
@@ -419,19 +449,22 @@ params.csv ──▶ Renderer (NumPy) ──▶ PNG full + preview ──▶ fil
                      │
                      ├──▶ SQLite / Postgres: render_events
                      ├──▶ Parquet: partitioned by formula_hash[:16]
-                     └──▶ Kafka topic: render.events
+                     ├──▶ Kafka topic: render.events
+                     └──▶ OpenLineage ──▶ Marquez
                                 │
                                 ▼
                         Consumer (group: mrp-consumer)
                                 │
                                 ├──▶ Postgres: render_events (idempotent)
-                                └──▶ render.events.dlq (poison / failure)
+                                ├──▶ render.events.dlq (poison / failure)
+                                └──▶ OpenLineage ──▶ Marquez
 
 Observability (all optional)
     logs (JSON + correlation_id) ─▶ stdout
     metrics (Prometheus) ─────────▶ :9100/metrics
     traces (OTLP/gRPC) ───────────▶ $OTEL_EXPORTER_OTLP_ENDPOINT
     alerts (Grafana) ─────────────▶ contact points
+    lineage (OpenLineage) ────────▶ $OPENLINEAGE_URL
 
 Benchmarks (offline)
     bench_batch / bench_streaming / bench_scale / bench_backfill
@@ -454,6 +487,7 @@ Layers:
   (`src/mrp/streaming/consumer.py`).
 - **Observability** — `src/mrp/observability/` (context, logging,
   metrics, tracing).
+- **Lineage** — `src/mrp/lineage/` (OpenLineage emitter).
 - **Benchmarks** — `benchmarks/` (batch, streaming, scale, backfill, cost).
 - **IaC** — `infra/terraform/{aws,gcp,shared}/`.
 - **CLI** — `mrp run`, `mrp batch`, `mrp produce`, `mrp consume`, `mrp formulas`.
@@ -478,12 +512,13 @@ pip install -e ".[dev,migrations]"     # Alembic + SQLAlchemy + psycopg
 pip install -e ".[dev,dq]"             # Great Expectations
 pip install -e ".[dev,integration]"    # testcontainers (Docker)
 pip install -e ".[dev,observability]"  # Prometheus + OpenTelemetry
+pip install -e ".[dev,lineage]"        # OpenLineage client
 
 cp .env.example .env
-# edit .env if you want Postgres, S3, or Kafka
+# edit .env if you want Postgres, S3, Kafka, or lineage
 ```
 
-Minimal (no Postgres, no S3, no Kafka):
+Minimal (no Postgres, no S3, no Kafka, no lineage):
 
 ```
 POSTGRES_DSN=sqlite:///./data/mrp.sqlite
@@ -495,6 +530,7 @@ Full stack (Docker Compose):
 ```bash
 docker compose up -d            # Postgres + Redpanda + MinIO + Grafana
 docker compose up -d consumer   # streaming consumer (metrics on :9100)
+docker compose up -d marquez    # Marquez API (lineage)
 ```
 
 ## Data quality
@@ -552,6 +588,8 @@ Coverage:
 - `test_streaming_metadata.py` — idempotent insert, migration adds column.
 - `test_consumer_dlq.py` — DLQ routing, retry semantics, poison-pill guard
   (no Kafka required; uses monkeypatched producer).
+- `test_lineage.py` — emitter disabled/enabled/error/singleton; UUID
+  normalization; no-op when `OPENLINEAGE_URL` is unset.
 
 Integration tests (`tests/integration/`, marked `integration`):
 
@@ -666,9 +704,9 @@ for a longer discussion. Summary:
 - **DLQ over retry-forever:** failed events don't block the consumer.
   Offset is committed after DLQ publish, so the stream moves forward while
   the failure is preserved for replay.
-- **Observability is opt-in:** every pillar (logs, metrics, traces, alerts)
-  defaults to off or no-op. Production enables them via env; local dev
-  doesn't pay the cost.
+- **Observability is opt-in:** every pillar (logs, metrics, traces, alerts,
+  lineage) defaults to off or no-op. Production enables them via env;
+  local dev doesn't pay the cost.
 - **Benchmarks are offline:** they write JSON to a git-ignored directory.
   They are descriptive, not prescriptive — numbers depend on the machine
   they run on.
@@ -676,6 +714,8 @@ for a longer discussion. Summary:
   are independent, not layered under a common module. This is deliberate —
   a single abstraction leaks for two clouds with different primitives.
   Duplication is honest; abstraction would be premature.
+- **Lineage is best-effort:** emit failures log a warning, never propagate.
+  The pipeline is decoupled from Marquez availability.
 
 ## Roadmap
 
@@ -700,6 +740,7 @@ for a longer discussion. Summary:
 - [x] Scale test: 10k renders, per-stage bottleneck
 - [x] Backfill test: 30 days x 5 specs
 - [x] Multi-cloud IaC (AWS + GCP)
+- [x] OpenLineage + Marquez for lineage
 - [x] Airflow DAG (`dags/render_pipeline_dag.py`)
 - [x] dbt models: `stg_renders → dim_formula / fct_render_events / agg_cost_daily`
 - [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB, events/min
@@ -707,7 +748,6 @@ for a longer discussion. Summary:
 - [x] Live demo on Streamlit Cloud
 
 ### Stretch
-- [ ] OpenLineage + Marquez for lineage
 - [ ] Spot instances (AWS Batch) for renderer
 
 ## License
