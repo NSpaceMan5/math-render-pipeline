@@ -1,0 +1,38 @@
+# Container image for AWS Batch spot renderer.
+#
+# Build:
+#   docker build -f infra/docker/Dockerfile.batch -t mrp-batch:latest .
+# Push:
+#   aws ecr get-login-password | docker login --username AWS --password-stdin <acct>.dkr.ecr.<region>.amazonaws.com
+#   docker tag mrp-batch:latest <acct>.dkr.ecr.<region>.amazonaws.com/mrp-batch:latest
+#   docker push <acct>.dkr.ecr.<region>.amazonaws.com/mrp-batch:latest
+#
+# The image is stateless: it reads POSTGRES_DSN from env (Secrets Manager
+# injects it), writes PNGs to S3 (USE_S3=true), and exits.
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY src ./src
+COPY params ./params
+COPY migrations ./migrations
+COPY alembic.ini ./
+
+RUN pip install -e ".[streaming,migrations,observability,lineage]"
+
+# Run as non-root (default user in python:slim is root; create one).
+RUN useradd --create-home --uid 1000 mrp \
+    && chown -R mrp:mrp /app
+USER mrp
+
+# Default command; AWS Batch job definition can override.
+CMD ["mrp", "batch", "--csv", "params/example_params.csv"]

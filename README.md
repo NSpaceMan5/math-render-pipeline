@@ -717,6 +717,61 @@ for a longer discussion. Summary:
 - **Lineage is best-effort:** emit failures log a warning, never propagate.
   The pipeline is decoupled from Marquez availability.
 
+## Spot renderer (AWS Batch)
+
+Renders scale to zero when idle, run on spot capacity, and survive
+interruptions via job retries. Roughly -70% versus on-demand.
+See [`docs/spot-batch.md`](docs/spot-batch.md) for the deploy runbook.
+
+```
+batch_submit.py ──▶ AWS Batch queue ──▶ SPOT compute env ──▶ container
+                                                │
+                                                ├──▶ S3 (PNG)
+                                                ├──▶ Postgres (metadata)
+                                                └──▶ CloudWatch Logs
+```
+
+### Compute environment
+
+| Property | Value | Why |
+|---|---|---|
+| Type | `SPOT` | cost |
+| Allocation | `SPOT_CAPACITY_OPTIMIZED` | pick least-interrupted pool |
+| Instance families | c6i / c6a / c5 / m6i / m6a / m5 | flexibility reduces reclaims |
+| min_vcpus | 0 | scale to zero |
+| max_vcpus | 64 | blast-radius cap |
+| Retry | 3 attempts on `Host EC2*` | survive spot reclaim |
+| Timeout | 3600s | kill runaway renders |
+
+### Cost
+
+| Instance | On-demand | Spot | Saving |
+|---|---|---|---|
+| c6i.large | $0.085/hr | ~$0.025/hr | -71% |
+| c5.large  | $0.085/hr | ~$0.026/hr | -69% |
+| m6i.large | $0.096/hr | ~$0.030/hr | -69% |
+
+### Submit jobs
+
+```bash
+# single spec
+python scripts/batch_submit.py \\
+  --job-queue mrp-renderer --job-definition mrp-renderer \\
+  --spec '{"formula_id":"polar_loom","width":800,"height":600}'
+
+# from CSV (one job per row)
+make batch-submit
+
+# dry run — prints commands without submitting
+make batch-dry
+```
+
+### Interruption safety
+
+A reclaimed spot instance is retried up to 3 times. Because
+`render_id` is deterministic and `insert_event` dedups, a re-render
+never produces a duplicate artifact.
+
 ## Roadmap
 
 ### Done
@@ -741,6 +796,7 @@ for a longer discussion. Summary:
 - [x] Backfill test: 30 days x 5 specs
 - [x] Multi-cloud IaC (AWS + GCP)
 - [x] OpenLineage + Marquez for lineage
+- [x] Spot instances (AWS Batch) for renderer
 - [x] Airflow DAG (`dags/render_pipeline_dag.py`)
 - [x] dbt models: `stg_renders → dim_formula / fct_render_events / agg_cost_daily`
 - [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB, events/min
@@ -748,7 +804,6 @@ for a longer discussion. Summary:
 - [x] Live demo on Streamlit Cloud
 
 ### Stretch
-- [ ] Spot instances (AWS Batch) for renderer
 
 ## License
 

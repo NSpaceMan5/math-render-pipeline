@@ -25,3 +25,9 @@ variable "tags" {
     ManagedBy = "terraform"
   }
 }
+
+variable "renderer_image" {
+  type        = string
+  description = "Container image URI for the AWS Batch renderer"
+  default     = "public.ecr.aws/docker/library/python:3.11-slim"
+}

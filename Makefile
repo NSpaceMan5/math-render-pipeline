@@ -21,3 +21,7 @@ render:
 
 render-batch:
 	mrp batch --csv params/example_params.csv
+
+# ---- spot batch (requires AWS credentials) ----
+batch-submit:   ; python scripts/batch_submit.py --job-queue mrp-renderer --job-definition mrp-renderer --spec-file params/example_params.csv
+batch-dry:      ; python scripts/batch_submit.py --job-queue mrp-renderer --job-definition mrp-renderer --spec-file params/example_params.csv --dry-run
