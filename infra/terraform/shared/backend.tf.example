@@ -1,0 +1,20 @@
+# Copy this into aws/backend.tf or gcp/backend.tf to use a remote backend.
+#
+# AWS S3 backend:
+# terraform {
+#   backend "s3" {
+#     bucket         = "my-tfstate-bucket"
+#     key            = "mrp/aws/terraform.tfstate"
+#     region         = "us-east-1"
+#     dynamodb_table = "terraform-locks"
+#     encrypt        = true
+#   }
+# }
+#
+# GCP GCS backend:
+# terraform {
+#   backend "gcs" {
+#     bucket = "my-tfstate-bucket"
+#     prefix = "mrp/gcp"
+#   }
+# }

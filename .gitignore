@@ -25,3 +25,11 @@ infra/terraform/*.tfstate*
 # benchmark outputs
 benchmarks/results/*.json
 !benchmarks/results/.gitkeep
+
+# terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
