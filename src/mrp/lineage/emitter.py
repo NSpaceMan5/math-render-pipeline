@@ -104,26 +104,26 @@ class LineageEmitter:
     # ---- render job -------------------------------------------------
     def emit_render_start(self, formula_id: str, spec_hash: str,
                           run_id: str) -> None:
-        self._emit(RunState.START, "render", run_id,
+        self._emit("START", "render", run_id,
                    inputs=[f"spec/{formula_id}/{spec_hash[:16]}"],
                    outputs=[])
 
     def emit_render_complete(self, formula_id: str, spec_hash: str,
                              render_id: str, storage_uri: str,
                              run_id: str) -> None:
-        self._emit(RunState.COMPLETE, "render", run_id,
+        self._emit("COMPLETE", "render", run_id,
                    inputs=[f"spec/{formula_id}/{spec_hash[:16]}"],
                    outputs=[f"renders/{render_id}", storage_uri])
 
     def emit_render_fail(self, formula_id: str, spec_hash: str,
                          run_id: str) -> None:
-        self._emit(RunState.FAIL, "render", run_id,
+        self._emit("FAIL", "render", run_id,
                    inputs=[f"spec/{formula_id}/{spec_hash[:16]}"],
                    outputs=[])
 
     # ---- consumer job -----------------------------------------------
     def emit_consumer_event(self, render_id: str, topic: str) -> None:
-        self._emit(RunState.COMPLETE, "consume", str(uuid.uuid4()),
+        self._emit("COMPLETE", "consume", str(uuid.uuid4()),
                    inputs=[f"topic/{topic}"],
                    outputs=[f"table/render_events/{render_id}"])
 
