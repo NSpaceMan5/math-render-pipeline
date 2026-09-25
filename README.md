@@ -19,8 +19,8 @@ table.
 
 Three tabs:
 
-- **Live render** — adjust parameters for any of the three formulas, see output instantly
-- **Gallery** — 12 seeded renders across all formulas
+- **Live render** — adjust parameters for any of the four formulas, see output instantly
+- **Gallery** — 16 seeded renders across all formulas
 - **Metrics** — runtime, cost per megapixel, raw metadata
 
 ## What This Is
@@ -61,6 +61,7 @@ A data-engineering pipeline for parameterized image generation. Every render is:
 | `polar_loom`    | RGB      | `rings, twist, decay, fold`           | Polar harmonics with radial shear   |
 | `harmonic_grid` | RGB      | `nx, ny, phase, skew, mix`            | Cartesian orthogonal harmonics      |
 | `moire_grid`    | RGB      | `f1, f2, angle, mix, sharpen`         | Interference of two rotated lattices|
+| `harmonograph`  | RGB      | `f1..f4, d1..d4, p1..p4, gamma`       | Damped Lissajous trace density      |
 
 **Legend:**
 - *RGB* = 8-bit unsigned, shape `(H, W, 3)`
@@ -74,6 +75,7 @@ A data-engineering pipeline for parameterized image generation. Every render is:
 | `polar_loom` | `rings=28, twist=2.7, decay=2.1, fold=1.15` |
 | `harmonic_grid` | `nx=6, ny=4, phase=0.0, skew=0.0, mix=0.5` |
 | `moire_grid` | `f1=22.0, f2=22.6, angle=0.06, mix=0.5, sharpen=1.4` |
+| `harmonograph` | `n_samples=200000, t_max=80.0, f1=2.01, f2=3.00, d1=0.020, d2=0.030, gamma=0.70` |
 
 Run `mrp formulas` for the live registry.
 
@@ -452,9 +454,10 @@ pytest -q -o addopts="" -m integration   # force override config defaults
 
 Coverage:
 
-- `test_evaluators.py`, `test_harmonic_grid.py`, `test_moire_grid.py` — output
-  shape/dtype, determinism, parameter sensitivity, non-blank check.
-- `test_properties.py` — Hypothesis invariants for all three formulas:
+- `test_evaluators.py`, `test_harmonic_grid.py`, `test_moire_grid.py`,
+  `test_harmonograph.py` — output shape/dtype, determinism, parameter
+  sensitivity, non-blank check.
+- `test_properties.py` — Hypothesis invariants for all four formulas:
   determinism across *any* valid parameter set, non-degenerate output.
 - `test_renderer.py` — hash stability, checksum format, preview < full.
 - `test_registry.py` — plural registry, defaults present, unknown raises.
@@ -539,14 +542,31 @@ Interference between two rotated lattices.
 Beat fringe width grows as the two frequencies converge and the rotation
 angle decreases.
 
+### `harmonograph`
+
+**Default** — `f1=2.01, f2=3.00, d1=0.020, d2=0.030, gamma=0.70`, 1600×1200.
+
+![harmonograph default](docs/preview/harmonograph_default.png)
+
+Damped Lissajous trace density: two pendulums swing a pen, the trace is
+binned into a 2D histogram, and density is mapped to RGB.
+
+**Sweep** — rows: `f2` (2.5 → 4.0), columns: `d1` (0.005 → 0.100).
+
+![harmonograph sweep](docs/preview/harmonograph_sweep.png)
+
+Higher `f2` increases the number of crossing lobes; lower damping (`d1`)
+lets the trace persist longer, filling more of the frame.
+
 ## Trade-offs
 
 See [`docs/blog/reproducible-math-art.md`](docs/blog/reproducible-math-art.md)
 for a longer discussion. Summary:
 
 - **Determinism** buys idempotency, auditability, cheap diffs.
-- **Cost:** `O(pixels × rings × 3)` per image. Does not scale like
-  neural rendering; scales like a scientific compute job.
+- **Cost:** `O(pixels × rings × 3)` per image for `polar_loom`; `O(n_samples)`
+  for `harmonograph`. Does not scale like neural rendering; scales like a
+  scientific compute job.
 - **Right tool when:** reproducibility is a hard requirement, sweeps
   matter, artifacts must be diffable.
 - **Wrong tool when:** photorealism or interactive latency is required.
@@ -563,13 +583,13 @@ for a longer discussion. Summary:
 ## Roadmap
 
 ### Done
-- [x] Three formulas (`polar_loom`, `harmonic_grid`, `moire_grid`)
+- [x] Four formulas (`polar_loom`, `harmonic_grid`, `moire_grid`, `harmonograph`)
 - [x] Batch + streaming ingestion (Kafka/Redpanda producer + consumer)
 - [x] Streaming reliability: retry w/ backoff, DLQ, poison-pill guard,
       correlation_id in every log line
 - [x] Data-quality runtime: schema + freshness + volume + integrity
       (soft by default, `--strict-integrity` for hard fail)
-- [x] Property-based tests (Hypothesis) for all three formulas
+- [x] Property-based tests (Hypothesis) for all four formulas
 - [x] Schema migration framework (Alembic) — SQLite + Postgres dialects
 - [x] Integration tests with testcontainers (real Kafka + Postgres)
 - [x] Great Expectations runtime wired into the DAG
@@ -590,7 +610,6 @@ for a longer discussion. Summary:
 - [x] Live demo on Streamlit Cloud
 
 ### Stretch
-- [ ] Fourth formula (`lissajous_web` / `harmonograph`)
 - [ ] Multi-cloud IaC (AWS + GCP)
 - [ ] OpenLineage + Marquez for lineage
 - [ ] Spot instances (AWS Batch) for renderer
