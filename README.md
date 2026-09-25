@@ -49,6 +49,8 @@ A data-engineering pipeline for parameterized image generation. Every render is:
 - **Benchmarked** — batch, streaming, scale, and backfill benchmarks plus a
   cost model in `benchmarks/`; JSON reports written to
   `benchmarks/results/`.
+- **Multi-cloud** — Terraform for AWS (S3 + RDS) and GCP (GCS + Cloud SQL),
+  matched resource mapping, identical outputs.
 - **Tested** — pytest suite covering shape, dtype, determinism, checksum,
   parameter sensitivity, metadata idempotency, schema migration, DLQ
   semantics, and integration tests against real Postgres + Kafka via
@@ -276,6 +278,85 @@ for compute (`c6i.large`), S3 storage and PUTs, and RDS. Two scenarios:
 Update `benchmarks/cost_model.py::PRICES` to reflect current rates or a
 different region. Numbers are illustrative, not a commitment.
 
+## Infrastructure as Code
+
+Two clouds, one interface. Terraform for both, matched resource mapping,
+identical outputs. See [`docs/iac.md`](docs/iac.md) for the full comparison.
+
+```
+infra/terraform/
+├── shared/          # conventions, backend example
+├── aws/             # S3 + RDS + CloudWatch
+└── gcp/             # GCS + Cloud SQL + Secret Manager
+```
+
+### Resource mapping
+
+| Capability | AWS | GCP |
+|---|---|---|
+| Object storage | S3 | Cloud Storage |
+| Tiered archive | STANDARD_IA → GLACIER_IR | NEARLINE → COLDLINE → ARCHIVE |
+| Managed Postgres | RDS `db.t4g.micro` | Cloud SQL `db-f1-micro` |
+| Encryption | SSE-S3 (AES256) | Google-managed |
+| Secret storage | Secrets Manager | Secret Manager |
+| Logs | CloudWatch Logs | Cloud Logging |
+| IAM for batch | IAM role + policy | Service account |
+| Serverless batch | AWS Batch | Cloud Run Jobs |
+
+### Usage
+
+```bash
+# AWS
+cd infra/terraform/aws
+terraform init
+terraform apply -var db_password=xxx
+
+# GCP
+cd infra/terraform/gcp
+terraform init
+terraform apply -var project_id=my-gcp-project -var db_password=xxx
+```
+
+Outputs: `bucket_name`, `db_endpoint` / `db_connection_name`, `connection_hint`.
+
+### Application wiring
+
+After `apply`, populate `.env` from the outputs:
+
+```
+# AWS
+POSTGRES_DSN=postgresql://mrp:<pw>@<db_endpoint>/mrp
+S3_BUCKET=<bucket_name>
+USE_S3=true
+
+# GCP
+POSTGRES_DSN=postgresql://mrp:<pw>@<db_connection_name>/mrp
+S3_BUCKET=<bucket_name>          # works with GCS via S3-compatible HMAC
+USE_S3=true
+```
+
+The code path is identical; only the endpoint differs.
+
+### Cost
+
+Estimated monthly cost for a portfolio deployment (idle DB, tiered storage
+for ~50 GB of renders):
+
+| Cloud | Compute | DB | Storage | Total |
+|---|---|---|---|---|
+| AWS | $0 (event-driven) | $13 (db.t4g.micro) | $1.15 (Glacier IR) | **~$14/mo** |
+| GCP | $0 | $9.5 (db-f1-micro) | $1.20 (COLDLINE) | **~$11/mo** |
+
+### Validation
+
+```bash
+make iac-fmt        # terraform fmt -recursive (both)
+make iac-validate   # terraform validate (both)
+```
+
+CI runs `terraform fmt -check` and `terraform validate` for both clouds on
+every push. No credentials required — validation is static.
+
 ## Metadata Schema
 
 Table `render_events` (SQLite or Postgres):
@@ -355,6 +436,10 @@ Observability (all optional)
 Benchmarks (offline)
     bench_batch / bench_streaming / bench_scale / bench_backfill
         └──▶ benchmarks/results/*.json ──▶ cost_model
+
+Infrastructure (Terraform)
+    infra/terraform/aws/  ─▶ S3 + RDS + CloudWatch
+    infra/terraform/gcp/  ─▶ GCS + Cloud SQL + Secret Manager
 ```
 
 Layers:
@@ -370,6 +455,7 @@ Layers:
 - **Observability** — `src/mrp/observability/` (context, logging,
   metrics, tracing).
 - **Benchmarks** — `benchmarks/` (batch, streaming, scale, backfill, cost).
+- **IaC** — `infra/terraform/{aws,gcp,shared}/`.
 - **CLI** — `mrp run`, `mrp batch`, `mrp produce`, `mrp consume`, `mrp formulas`.
 - **DAG** — Airflow (`dags/render_pipeline_dag.py`).
 - **Transforms** — dbt models (`dbt/models/`).
@@ -480,7 +566,7 @@ job.
 
 ## CI
 
-GitHub Actions runs two jobs on every push and PR. Runs are cancelled on
+GitHub Actions runs three jobs on every push and PR. Runs are cancelled on
 push to the same ref to avoid stacking.
 
 **test**
@@ -496,6 +582,13 @@ push to the same ref to avoid stacking.
 2. `pytest -q -o addopts="" -m integration tests/integration -v`
    — spins up Postgres 16 and Redpanda via testcontainers.
    `TESTCONTAINERS_RYUK_DISABLED=true` avoids reaper hangs on GH runners.
+
+**terraform**
+1. `terraform fmt -check -recursive` (aws + gcp)
+2. `terraform init -backend=false` (aws + gcp)
+3. `terraform validate` (aws + gcp)
+
+Static validation only — no credentials, no cloud API calls.
 
 ## Visual Output
 
@@ -579,6 +672,10 @@ for a longer discussion. Summary:
 - **Benchmarks are offline:** they write JSON to a git-ignored directory.
   They are descriptive, not prescriptive — numbers depend on the machine
   they run on.
+- **Multi-cloud without abstraction:** AWS and GCP Terraform directories
+  are independent, not layered under a common module. This is deliberate —
+  a single abstraction leaks for two clouds with different primitives.
+  Duplication is honest; abstraction would be premature.
 
 ## Roadmap
 
@@ -602,15 +699,14 @@ for a longer discussion. Summary:
 - [x] Cost model: $ per 1000 renders
 - [x] Scale test: 10k renders, per-stage bottleneck
 - [x] Backfill test: 30 days x 5 specs
+- [x] Multi-cloud IaC (AWS + GCP)
 - [x] Airflow DAG (`dags/render_pipeline_dag.py`)
 - [x] dbt models: `stg_renders → dim_formula / fct_render_events / agg_cost_daily`
 - [x] Grafana dashboard: CPU-minutes/day, renders/day, storage MB, events/min
 - [x] Docker Compose stack (Postgres + Redpanda + MinIO + Grafana)
-- [x] Terraform skeleton: S3 lifecycle tiering + RDS Postgres
 - [x] Live demo on Streamlit Cloud
 
 ### Stretch
-- [ ] Multi-cloud IaC (AWS + GCP)
 - [ ] OpenLineage + Marquez for lineage
 - [ ] Spot instances (AWS Batch) for renderer
 
